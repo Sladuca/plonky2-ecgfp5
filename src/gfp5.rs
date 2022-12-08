@@ -19,7 +19,7 @@ impl QuinticExtensionTarget {
         Self(limbs)
     }
 
-    pub fn to_target_array(&self)  -> [Target; 5] {
+    pub fn to_target_array(&self) -> [Target; 5] {
         self.0
     }
 }
@@ -32,13 +32,34 @@ pub trait CircuitBuilderGfp5<F: RichField + Extendable<5>> {
     fn zero_gfp5(&mut self) -> QuinticExtensionTarget;
     fn one_gfp5(&mut self) -> QuinticExtensionTarget;
     fn constant_gfp5(&mut self, c: QuinticExtension<F>) -> QuinticExtensionTarget;
-    fn select_gfp5(&mut self, cond: BoolTarget, a: QuinticExtensionTarget, b: QuinticExtensionTarget) -> QuinticExtensionTarget;
+    fn select_gfp5(
+        &mut self,
+        cond: BoolTarget,
+        a: QuinticExtensionTarget,
+        b: QuinticExtensionTarget,
+    ) -> QuinticExtensionTarget;
 
     fn neg_gfp5(&mut self, a: QuinticExtensionTarget) -> QuinticExtensionTarget;
-    fn add_gfp5(&mut self, a: QuinticExtensionTarget, b: QuinticExtensionTarget) -> QuinticExtensionTarget;
-    fn sub_gfp5(&mut self, a: QuinticExtensionTarget, b: QuinticExtensionTarget) -> QuinticExtensionTarget;
-    fn mul_gfp5(&mut self, a: QuinticExtensionTarget, b: QuinticExtensionTarget) -> QuinticExtensionTarget;
-    fn div_gfp5(&mut self, a: QuinticExtensionTarget, b: QuinticExtensionTarget) -> QuinticExtensionTarget;
+    fn add_gfp5(
+        &mut self,
+        a: QuinticExtensionTarget,
+        b: QuinticExtensionTarget,
+    ) -> QuinticExtensionTarget;
+    fn sub_gfp5(
+        &mut self,
+        a: QuinticExtensionTarget,
+        b: QuinticExtensionTarget,
+    ) -> QuinticExtensionTarget;
+    fn mul_gfp5(
+        &mut self,
+        a: QuinticExtensionTarget,
+        b: QuinticExtensionTarget,
+    ) -> QuinticExtensionTarget;
+    fn div_gfp5(
+        &mut self,
+        a: QuinticExtensionTarget,
+        b: QuinticExtensionTarget,
+    ) -> QuinticExtensionTarget;
     fn inverse_gfp5(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget;
     fn any_sqrt_gfp5(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget;
     fn canonical_sqrt_gfp5(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget;
@@ -46,14 +67,22 @@ pub trait CircuitBuilderGfp5<F: RichField + Extendable<5>> {
 
     fn square_gfp5(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget;
     fn add_many_gfp5(&mut self, terms: Vec<QuinticExtensionTarget>) -> QuinticExtensionTarget;
-    fn dot_product_gfp5(&mut self, a: Vec<QuinticExtensionTarget>, b: Vec<QuinticExtensionTarget>) -> QuinticExtensionTarget;
+    fn dot_product_gfp5(
+        &mut self,
+        a: Vec<QuinticExtensionTarget>,
+        b: Vec<QuinticExtensionTarget>,
+    ) -> QuinticExtensionTarget;
 }
 
 pub trait PartialWitnessGfp5<F: RichField + Extendable<5>>: Witness<F> {
     fn get_gfp5_target(&self, target: QuinticExtensionTarget) -> QuinticExtension<F>;
     fn get_gfp5_targets(&self, targets: &[QuinticExtensionTarget]) -> Vec<QuinticExtension<F>>;
     fn set_gfp5_target(&mut self, target: QuinticExtensionTarget, value: QuinticExtension<F>);
-    fn set_gfp5_targets(&mut self, targets: &[QuinticExtensionTarget], values: &[QuinticExtension<F>]);
+    fn set_gfp5_targets(
+        &mut self,
+        targets: &[QuinticExtensionTarget],
+        values: &[QuinticExtension<F>],
+    );
 }
 
 impl<W: Witness<F>, F: RichField + Extendable<5>> PartialWitnessGfp5<F> for W {
@@ -83,14 +112,20 @@ impl<W: Witness<F>, F: RichField + Extendable<5>> PartialWitnessGfp5<F> for W {
         self.set_target(t4, v4);
     }
 
-    fn set_gfp5_targets(&mut self, targets: &[QuinticExtensionTarget], values: &[QuinticExtension<F>]) {
+    fn set_gfp5_targets(
+        &mut self,
+        targets: &[QuinticExtensionTarget],
+        values: &[QuinticExtension<F>],
+    ) {
         for (&t, &v) in targets.iter().zip(values.iter()) {
             self.set_gfp5_target(t, v);
         }
     }
 }
 
-impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilderGfp5<F> for CircuitBuilder<F, D> {
+impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilderGfp5<F>
+    for CircuitBuilder<F, D>
+{
     fn add_virtual_gfp5_target(&mut self) -> QuinticExtensionTarget {
         QuinticExtensionTarget::new([
             self.add_virtual_target(),
@@ -102,7 +137,11 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
     }
 
     fn connect_gfp5(&mut self, a: QuinticExtensionTarget, b: QuinticExtensionTarget) {
-        for (lhs, rhs) in a.to_target_array().into_iter().zip(b.to_target_array().into_iter()) {
+        for (lhs, rhs) in a
+            .to_target_array()
+            .into_iter()
+            .zip(b.to_target_array().into_iter())
+        {
             self.connect(lhs, rhs);
         }
     }
@@ -118,7 +157,13 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
     }
 
     fn one_gfp5(&mut self) -> QuinticExtensionTarget {
-        QuinticExtensionTarget::new([self.one(), self.zero(), self.zero(), self.zero(), self.zero()])
+        QuinticExtensionTarget::new([
+            self.one(),
+            self.zero(),
+            self.zero(),
+            self.zero(),
+            self.zero(),
+        ])
     }
 
     fn constant_gfp5(&mut self, c: QuinticExtension<F>) -> QuinticExtensionTarget {
@@ -132,7 +177,12 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
         ])
     }
 
-    fn select_gfp5(&mut self, cond: BoolTarget, a: QuinticExtensionTarget, b: QuinticExtensionTarget) -> QuinticExtensionTarget {
+    fn select_gfp5(
+        &mut self,
+        cond: BoolTarget,
+        a: QuinticExtensionTarget,
+        b: QuinticExtensionTarget,
+    ) -> QuinticExtensionTarget {
         let QuinticExtensionTarget([a0, a1, a2, a3, a4]) = a;
         let QuinticExtensionTarget([b0, b1, b2, b3, b4]) = b;
         QuinticExtensionTarget::new([
@@ -155,7 +205,11 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
         ])
     }
 
-    fn add_gfp5(&mut self, a: QuinticExtensionTarget, b: QuinticExtensionTarget) -> QuinticExtensionTarget {
+    fn add_gfp5(
+        &mut self,
+        a: QuinticExtensionTarget,
+        b: QuinticExtensionTarget,
+    ) -> QuinticExtensionTarget {
         let QuinticExtensionTarget([a0, a1, a2, a3, a4]) = a;
         let QuinticExtensionTarget([b0, b1, b2, b3, b4]) = b;
         QuinticExtensionTarget::new([
@@ -164,10 +218,14 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
             self.add(a2, b2),
             self.add(a3, b3),
             self.add(a4, b4),
-        ]) 
+        ])
     }
 
-    fn sub_gfp5(&mut self, a: QuinticExtensionTarget, b: QuinticExtensionTarget) -> QuinticExtensionTarget {
+    fn sub_gfp5(
+        &mut self,
+        a: QuinticExtensionTarget,
+        b: QuinticExtensionTarget,
+    ) -> QuinticExtensionTarget {
         let QuinticExtensionTarget([a0, a1, a2, a3, a4]) = a;
         let QuinticExtensionTarget([b0, b1, b2, b3, b4]) = b;
         QuinticExtensionTarget::new([
@@ -176,11 +234,14 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
             self.sub(a2, b2),
             self.sub(a3, b3),
             self.sub(a4, b4),
-        ]) 
+        ])
     }
 
-
-    fn mul_gfp5(&mut self, a: QuinticExtensionTarget, b: QuinticExtensionTarget) -> QuinticExtensionTarget {
+    fn mul_gfp5(
+        &mut self,
+        a: QuinticExtensionTarget,
+        b: QuinticExtensionTarget,
+    ) -> QuinticExtensionTarget {
         let QuinticExtensionTarget([a0, a1, a2, a3, a4]) = a;
         let QuinticExtensionTarget([b0, b1, b2, b3, b4]) = b;
 
@@ -188,7 +249,7 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
         // c1 ← a0b1 + a1b0 + 3(a2b4 + a3b3 + a4b2)
         // c2 ← a0b2 + a1b1 + a2b0 + 3(a3b4 + a4b3)
         // c3 ← a0b3 + a1b2 + a2b1 + a3b0 + 3a4b4
-        // c4 ← a0b4 + a1b3 + a2b2 + a3b1 + a4b0 
+        // c4 ← a0b4 + a1b3 + a2b2 + a3b1 + a4b0
 
         let mut c0 = self.mul(a4, b1);
         c0 = self.mul_add(a3, b2, c0);
@@ -210,7 +271,7 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
         c2 = self.mul_add(a2, b0, c2);
         c2 = self.mul_add(a1, b1, c2);
         c2 = self.mul_add(a0, b2, c2);
-        
+
         let mut c3 = self.mul(a4, b4);
         c3 = self.mul_const(F::from_canonical_u64(3), c3);
         c3 = self.mul_add(a3, b0, c3);
@@ -227,7 +288,11 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
         QuinticExtensionTarget::new([c0, c1, c2, c3, c4])
     }
 
-    fn div_gfp5(&mut self, a: QuinticExtensionTarget, b: QuinticExtensionTarget) -> QuinticExtensionTarget {
+    fn div_gfp5(
+        &mut self,
+        a: QuinticExtensionTarget,
+        b: QuinticExtensionTarget,
+    ) -> QuinticExtensionTarget {
         let quotient = self.add_virtual_gfp5_target();
         self.add_simple_generator(QuinticQuotientGenerator::new(a, b, quotient));
 
@@ -251,7 +316,7 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
     fn any_sqrt_gfp5(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget {
         let root_x = self.add_virtual_gfp5_target();
         self.add_simple_generator(QuinticSqrtGenerator::new(x, root_x));
-        
+
         let should_be_x = self.square_gfp5(root_x);
         self.connect_gfp5(should_be_x, x);
 
@@ -276,7 +341,7 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
             // SAFETY: targets from bit_decomp guaranteed to contain values of 0 or 1
             let sign_i = BoolTarget::new_unsafe(self.sub(one, bit_decomp[0]));
             let is_zero_i = self.is_equal(limb, zero);
-            
+
             // sign = sign || (is_zero && sign_i)
             // is_zero = is_zero && is_zero_i
 
@@ -309,15 +374,19 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
         for term in terms {
             sum = self.add_gfp5(sum, term);
         }
-        sum 
+        sum
     }
 
-    fn dot_product_gfp5(&mut self, a: Vec<QuinticExtensionTarget>, b: Vec<QuinticExtensionTarget>) -> QuinticExtensionTarget {
+    fn dot_product_gfp5(
+        &mut self,
+        a: Vec<QuinticExtensionTarget>,
+        b: Vec<QuinticExtensionTarget>,
+    ) -> QuinticExtensionTarget {
         let mut terms = Vec::new();
         for (a, b) in a.into_iter().zip(b.into_iter()) {
             terms.push(self.mul_gfp5(a, b));
         }
-        self.add_many_gfp5(terms) 
+        self.add_many_gfp5(terms)
     }
 }
 
@@ -329,14 +398,20 @@ pub struct QuinticQuotientGenerator {
 }
 
 impl QuinticQuotientGenerator {
-    pub fn new(numerator: QuinticExtensionTarget, denominator: QuinticExtensionTarget, quotient: QuinticExtensionTarget) -> Self {
-        QuinticQuotientGenerator { numerator, denominator, quotient }
+    pub fn new(
+        numerator: QuinticExtensionTarget,
+        denominator: QuinticExtensionTarget,
+        quotient: QuinticExtensionTarget,
+    ) -> Self {
+        QuinticQuotientGenerator {
+            numerator,
+            denominator,
+            quotient,
+        }
     }
 }
 
-impl<F: RichField + Extendable<5>> SimpleGenerator<F>
-    for QuinticQuotientGenerator 
-{
+impl<F: RichField + Extendable<5>> SimpleGenerator<F> for QuinticQuotientGenerator {
     fn dependencies(&self) -> Vec<Target> {
         let mut deps = self.numerator.to_target_array().to_vec();
         deps.extend(self.denominator.to_target_array());
@@ -344,14 +419,22 @@ impl<F: RichField + Extendable<5>> SimpleGenerator<F>
     }
 
     fn run_once(&self, witness: &PartitionWitness<F>, out_buffer: &mut GeneratedValues<F>) {
-        let numerator_limbs = self.numerator.to_target_array().map(|t| witness.get_target(t));
+        let numerator_limbs = self
+            .numerator
+            .to_target_array()
+            .map(|t| witness.get_target(t));
         let numerator = QuinticExtension::<F>::from_basefield_array(numerator_limbs);
 
-        let denominator_limbs = self.denominator.to_target_array().map(|t| witness.get_target(t));
+        let denominator_limbs = self
+            .denominator
+            .to_target_array()
+            .map(|t| witness.get_target(t));
         let denominator = QuinticExtension::<F>::from_basefield_array(denominator_limbs);
 
         let quotient = numerator / denominator;
-        for (lhs, rhs) in self.quotient.to_target_array().into_iter().zip(<QuinticExtension<F> as FieldExtension<5>>::to_basefield_array(&quotient).into_iter()) {
+        for (lhs, rhs) in self.quotient.to_target_array().into_iter().zip(
+            <QuinticExtension<F> as FieldExtension<5>>::to_basefield_array(&quotient).into_iter(),
+        ) {
             out_buffer.set_target(lhs, rhs);
         }
     }
@@ -369,9 +452,7 @@ impl QuinticSqrtGenerator {
     }
 }
 
-impl<F: RichField + Extendable<5>> SimpleGenerator<F>
-    for QuinticSqrtGenerator
-{
+impl<F: RichField + Extendable<5>> SimpleGenerator<F> for QuinticSqrtGenerator {
     fn dependencies(&self) -> Vec<Target> {
         self.x.to_target_array().to_vec()
     }
@@ -381,8 +462,10 @@ impl<F: RichField + Extendable<5>> SimpleGenerator<F>
         let x = QuinticExtension::<F>::from_basefield_array(x_limbs);
 
         let root_x = canonical_sqrt_gfp5(x).expect("not a square!");
-        
-        for (lhs, rhs) in self.root_x.to_target_array().into_iter().zip(<QuinticExtension<F> as FieldExtension<5>>::to_basefield_array(&root_x).into_iter()) {
+
+        for (lhs, rhs) in self.root_x.to_target_array().into_iter().zip(
+            <QuinticExtension<F> as FieldExtension<5>>::to_basefield_array(&root_x).into_iter(),
+        ) {
             out_buffer.set_target(lhs, rhs);
         }
     }
@@ -404,10 +487,11 @@ fn gfp5_sgn0<F: RichField + Extendable<5>>(x: QuinticExtension<F>) -> bool {
     return sign;
 }
 
-
 // returns the "canoncal" square root of x, if it exists
 // the "canonical" square root is the one such that `sgn0(sqrt(x)) == true`
-fn canonical_sqrt_gfp5<F: RichField + Extendable<5>>(x: QuinticExtension<F>) -> Option<QuinticExtension<F>> {
+fn canonical_sqrt_gfp5<F: RichField + Extendable<5>>(
+    x: QuinticExtension<F>,
+) -> Option<QuinticExtension<F>> {
     match sqrt_gfp5(x) {
         Some(root_x) => {
             if gfp5_sgn0(root_x) {
@@ -416,7 +500,7 @@ fn canonical_sqrt_gfp5<F: RichField + Extendable<5>>(x: QuinticExtension<F>) -> 
                 Some(-root_x)
             }
         }
-        None => None
+        None => None,
     }
 }
 
@@ -432,14 +516,15 @@ fn sqrt_gfp5<F: RichField + Extendable<5>>(x: QuinticExtension<F>) -> Option<Qui
     let [f0, f1, f2, f3, f4] = f.0;
     let g = x0 * f0 + F::from_canonical_u64(3) * (x1 * f4 + x2 * f3 + x3 * f2 + x4 * f1);
 
-    g.sqrt().map(|s| e.try_inverse().unwrap_or(QuinticExtension::<F>::ZERO) * s.into())
+    g.sqrt()
+        .map(|s| e.try_inverse().unwrap_or(QuinticExtension::<F>::ZERO) * s.into())
 }
 
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-    use plonky2::field::types::{Field, Sample};
     use plonky2::field::extension::quintic::QuinticExtension;
+    use plonky2::field::types::{Field, Sample};
     use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
@@ -453,7 +538,7 @@ mod tests {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-        type GFp5 = QuinticExtension::<F>;
+        type GFp5 = QuinticExtension<F>;
 
         let mut rng = thread_rng();
 
@@ -483,10 +568,9 @@ mod tests {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-        type GFp5 = QuinticExtension::<F>;
+        type GFp5 = QuinticExtension<F>;
 
         let mut rng = thread_rng();
-
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
@@ -514,10 +598,9 @@ mod tests {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-        type GFp5 = QuinticExtension::<F>;
+        type GFp5 = QuinticExtension<F>;
 
         let mut rng = thread_rng();
-
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
@@ -539,17 +622,15 @@ mod tests {
         let proof = circuit.prove(pw)?;
         circuit.verify(proof)
     }
-    
 
     #[test]
     fn test_div() -> Result<()> {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-        type GFp5 = QuinticExtension::<F>;
+        type GFp5 = QuinticExtension<F>;
 
         let mut rng = thread_rng();
-
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
@@ -577,7 +658,7 @@ mod tests {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-        type GFp5 = QuinticExtension::<F>;
+        type GFp5 = QuinticExtension<F>;
 
         let mut rng = thread_rng();
 
@@ -600,13 +681,12 @@ mod tests {
         circuit.verify(proof)
     }
 
-
     #[test]
     fn test_any_sqrt_gfp5() -> Result<()> {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-        type GFp5 = QuinticExtension::<F>;
+        type GFp5 = QuinticExtension<F>;
 
         let mut rng = thread_rng();
 
@@ -624,13 +704,14 @@ mod tests {
         let pw = PartialWitness::new();
         let proof = circuit.prove(pw)?;
         circuit.verify(proof)
-    }    #[test]
+    }
+    #[test]
 
     fn test_canonical_sqrt_gfp5() -> Result<()> {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-        type GFp5 = QuinticExtension::<F>;
+        type GFp5 = QuinticExtension<F>;
 
         let mut rng = thread_rng();
 
@@ -655,7 +736,7 @@ mod tests {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-        type GFp5 = QuinticExtension::<F>;
+        type GFp5 = QuinticExtension<F>;
 
         let mut rng = thread_rng();
 
@@ -673,7 +754,7 @@ mod tests {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-        type GFp5 = QuinticExtension::<F>;
+        type GFp5 = QuinticExtension<F>;
 
         let mut rng = thread_rng();
 
