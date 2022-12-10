@@ -1,3 +1,4 @@
 extern crate alloc;
 
-pub mod gfp5;
+pub mod base_field;
+pub mod curve;
