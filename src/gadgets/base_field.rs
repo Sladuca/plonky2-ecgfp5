@@ -38,6 +38,7 @@ pub trait CircuitBuilderQuinticExt<F: RichField + Extendable<5>> {
         a: QuinticExtensionTarget,
         b: QuinticExtensionTarget,
     ) -> QuinticExtensionTarget;
+    fn random_access_quintic_ext(&mut self, access_index: Target, v: Vec<QuinticExtensionTarget>) -> QuinticExtensionTarget;
     fn is_equal_quintic_ext(
         &mut self,
         a: QuinticExtensionTarget,
@@ -82,7 +83,10 @@ pub trait CircuitBuilderQuinticExt<F: RichField + Extendable<5>> {
     fn sgn0_quintic_ext(&mut self, x: QuinticExtensionTarget) -> BoolTarget;
 
     fn square_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget;
-    fn add_many_quintic_ext(&mut self, terms: Vec<QuinticExtensionTarget>) -> QuinticExtensionTarget;
+    fn add_many_quintic_ext(
+        &mut self,
+        terms: Vec<QuinticExtensionTarget>,
+    ) -> QuinticExtensionTarget;
     fn dot_product_quintic_ext(
         &mut self,
         a: Vec<QuinticExtensionTarget>,
@@ -92,8 +96,15 @@ pub trait CircuitBuilderQuinticExt<F: RichField + Extendable<5>> {
 
 pub trait PartialWitnessQuinticExt<F: RichField + Extendable<5>>: Witness<F> {
     fn get_quintic_ext_target(&self, target: QuinticExtensionTarget) -> QuinticExtension<F>;
-    fn get_quintic_ext_targets(&self, targets: &[QuinticExtensionTarget]) -> Vec<QuinticExtension<F>>;
-    fn set_quintic_ext_target(&mut self, target: QuinticExtensionTarget, value: QuinticExtension<F>);
+    fn get_quintic_ext_targets(
+        &self,
+        targets: &[QuinticExtensionTarget],
+    ) -> Vec<QuinticExtension<F>>;
+    fn set_quintic_ext_target(
+        &mut self,
+        target: QuinticExtensionTarget,
+        value: QuinticExtension<F>,
+    );
     fn set_quintic_ext_targets(
         &mut self,
         targets: &[QuinticExtensionTarget],
@@ -113,11 +124,21 @@ impl<W: Witness<F>, F: RichField + Extendable<5>> PartialWitnessQuinticExt<F> fo
         ])
     }
 
-    fn get_quintic_ext_targets(&self, targets: &[QuinticExtensionTarget]) -> Vec<QuinticExtension<F>> {
-        targets.iter().map(|&t| self.get_quintic_ext_target(t)).collect()
+    fn get_quintic_ext_targets(
+        &self,
+        targets: &[QuinticExtensionTarget],
+    ) -> Vec<QuinticExtension<F>> {
+        targets
+            .iter()
+            .map(|&t| self.get_quintic_ext_target(t))
+            .collect()
     }
 
-    fn set_quintic_ext_target(&mut self, target: QuinticExtensionTarget, value: QuinticExtension<F>) {
+    fn set_quintic_ext_target(
+        &mut self,
+        target: QuinticExtensionTarget,
+        value: QuinticExtension<F>,
+    ) {
         let QuinticExtensionTarget([t0, t1, t2, t3, t4]) = target;
         let [v0, v1, v2, v3, v4] = value.0;
 
@@ -210,6 +231,25 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
         ])
     }
 
+    fn random_access_quintic_ext(&mut self, access_index: Target, v: Vec<QuinticExtensionTarget>) -> QuinticExtensionTarget {
+        let vecs = [Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+        for QuinticExtensionTarget([a0, a1, a2, a3, a4]) in v {
+            vecs[0].push(a0);
+            vecs[1].push(a1);
+            vecs[2].push(a2);
+            vecs[3].push(a3);
+            vecs[4].push(a4);
+        }
+
+        QuinticExtensionTarget([
+            self.random_access(access_index, vecs[0]),
+            self.random_access(access_index, vecs[1]),
+            self.random_access(access_index, vecs[2]),
+            self.random_access(access_index, vecs[3]),
+            self.random_access(access_index, vecs[4]),
+        ])
+    }
+
     fn is_equal_quintic_ext(
         &mut self,
         a: QuinticExtensionTarget,
@@ -270,9 +310,8 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
             self.add_const(a2, c2),
             self.add_const(a3, c3),
             self.add_const(a4, c4),
-        ]) 
+        ])
     }
-
 
     fn sub_quintic_ext(
         &mut self,
@@ -342,12 +381,17 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
     }
 
     // TODO optimize
-    fn mul_const_quintic_ext(&mut self, c: QuinticExtension<F>, a: QuinticExtensionTarget) -> QuinticExtensionTarget {
+    fn mul_const_quintic_ext(
+        &mut self,
+        c: QuinticExtension<F>,
+        a: QuinticExtensionTarget,
+    ) -> QuinticExtensionTarget {
         let QuinticExtensionTarget([b0, b1, b2, b3, b4]) = a;
         let c = self.constant_quintic_ext(c);
         self.mul_quintic_ext(c, a)
     }
 
+    /// returns `a / b` is `b` is nonzero, `0` otherwise
     fn div_quintic_ext(
         &mut self,
         a: QuinticExtensionTarget,
@@ -430,7 +474,10 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
         self.mul_quintic_ext(a, a)
     }
 
-    fn add_many_quintic_ext(&mut self, terms: Vec<QuinticExtensionTarget>) -> QuinticExtensionTarget {
+    fn add_many_quintic_ext(
+        &mut self,
+        terms: Vec<QuinticExtensionTarget>,
+    ) -> QuinticExtensionTarget {
         let mut sum = self.zero_quintic_ext();
         for term in terms {
             sum = self.add_quintic_ext(sum, term);
@@ -492,7 +539,7 @@ impl<F: RichField + Extendable<5>> SimpleGenerator<F> for QuinticQuotientGenerat
             .map(|t| witness.get_target(t));
         let denominator = QuinticExtension::<F>::from_basefield_array(denominator_limbs);
 
-        let quotient = numerator / denominator;
+        let quotient = if denominator == QuinticExtension::<F>::ZERO { QuinticExtension::<F>::ZERO } else { numerator / denominator };
         for (lhs, rhs) in self.quotient.to_target_array().into_iter().zip(
             <QuinticExtension<F> as FieldExtension<5>>::to_basefield_array(&quotient).into_iter(),
         ) {
@@ -567,7 +614,9 @@ fn canonical_sqrt_quintic_ext<F: RichField + Extendable<5>>(
 
 /// returns `Some(sqrt(x))` if `x` is a square in the field, and `None` otherwise
 /// basically copied from here: https://github.com/pornin/ecquintic_ext/blob/ce059c6d1e1662db437aecbf3db6bb67fe63c716/python/ecGFp5.py#L879
-fn sqrt_quintic_ext<F: RichField + Extendable<5>>(x: QuinticExtension<F>) -> Option<QuinticExtension<F>> {
+fn sqrt_quintic_ext<F: RichField + Extendable<5>>(
+    x: QuinticExtension<F>,
+) -> Option<QuinticExtension<F>> {
     let v = x.exp_power_of_2(31);
     let d = x * v.exp_power_of_2(32) * v.try_inverse().unwrap_or(QuinticExtension::<F>::ZERO);
     let e = (d * d.repeated_frobenius(2)).frobenius();
