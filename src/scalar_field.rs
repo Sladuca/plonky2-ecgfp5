@@ -109,7 +109,7 @@ impl Field for EcGFp5Scalar {
 
     fn order() -> BigUint {
         BigUint::from_slice(&[
-            0x948BFFE0,
+            0x948BFFE1,
             0xE80FD996,
             0xD724A09C,
             0xE8885C39,
