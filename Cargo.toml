@@ -7,10 +7,12 @@ edition = "2021"
 
 [dependencies]
 plonky2 = { path = "../plonky2/plonky2" }
+plonky2_field = { path = "../plonky2/field" }
 plonky2_ecdsa = { path = "../plonky2/ecdsa" }
 num = "0.4"
 itertools = "0.10"
 serde = "1"
+rand = { version = "0.8.5", default-features = false, features = ["getrandom"] }
 
 [dev-dependencies]
 rand = "0.8.5"

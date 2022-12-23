@@ -232,21 +232,26 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
     }
 
     fn random_access_quintic_ext(&mut self, access_index: Target, v: Vec<QuinticExtensionTarget>) -> QuinticExtensionTarget {
-        let vecs = [Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+        let mut a0s = Vec::new();
+        let mut a1s = Vec::new();
+        let mut a2s = Vec::new();
+        let mut a3s = Vec::new();
+        let mut a4s = Vec::new();
         for QuinticExtensionTarget([a0, a1, a2, a3, a4]) in v {
-            vecs[0].push(a0);
-            vecs[1].push(a1);
-            vecs[2].push(a2);
-            vecs[3].push(a3);
-            vecs[4].push(a4);
+            a0s.push(a0);
+            a1s.push(a1);
+            a2s.push(a2);
+            a3s.push(a3);
+            a4s.push(a4);
         }
 
+
         QuinticExtensionTarget([
-            self.random_access(access_index, vecs[0]),
-            self.random_access(access_index, vecs[1]),
-            self.random_access(access_index, vecs[2]),
-            self.random_access(access_index, vecs[3]),
-            self.random_access(access_index, vecs[4]),
+            self.random_access(access_index, a0s),
+            self.random_access(access_index, a1s),
+            self.random_access(access_index, a2s),
+            self.random_access(access_index, a3s),
+            self.random_access(access_index, a4s),
         ])
     }
 

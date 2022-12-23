@@ -9,7 +9,7 @@ use num::bigint::BigUint;
 use num::{Integer, One};
 use serde::{Deserialize, Serialize};
 
-use crate::types::{Field, PrimeField, Sample};
+use plonky2_field::types::{Field, PrimeField, Sample};
 
 /// The Scalar field of the ECgFP5 elliptic curve.
 ///
@@ -79,39 +79,46 @@ impl Sample for EcGFp5Scalar {
 }
 
 impl Field for EcGFp5Scalar {
-    const ZERO: Self = Self([0; 4]);
-    const ONE: Self = Self([1, 0, 0, 0]);
-    const TWO: Self = Self([2, 0, 0, 0]);
+    const ZERO: Self = Self([0; 5]);
+    const ONE: Self = Self([1, 0, 0, 0, 0]);
+    const TWO: Self = Self([2, 0, 0, 0, 0]);
     const NEG_ONE: Self = Self([
-		0xE80FD996948BFFE1,
-		0xE8885C39D724A09C,
-		0x7FFFFFE6CFB80639,
-		0x7FFFFFF100000016,
-		0x7FFFFFFD80000007,
+        0xE80FD996_948BFFE0,
+        0xE8885C39_D724A09C,
+        0x7FFFFFE6_CFB80639,
+        0x7FFFFFF1_00000016,
+        0x7FFFFFFD_80000007
     ]);
 
     const TWO_ADICITY: usize = 5;
     const CHARACTERISTIC_TWO_ADICITY: usize = Self::TWO_ADICITY;
 
     // Sage: `g = GF(p).multiplicative_generator()`
-	// TODO install sage and do this
-    const MULTIPLICATIVE_GROUP_GENERATOR: Self = Self([3, 0, 0, 0]);
+    const MULTIPLICATIVE_GROUP_GENERATOR: Self = Self([6, 0, 0, 0, 0]);
 
-    // Sage: `g_2 = power_mod(g, (p - 1) // 2^5), p)`
-	// TODO
+    // Sage: `g_2 = power_mod(g, (p - 1) // 2^5, p)`
     const POWER_OF_TWO_GENERATOR: Self = Self([
-        0x992f4b5402b052f2,
-        0x98BDEAB680756045,
-        0xDF9879A3FBC483A8,
-        0xC1DC060E7A91986,
+        0xCC13C747_343470DD,
+        0xC09E9EF2_B5CC8610,
+        0xBE95D8B7_B2143AF3,
+        0xA774D847_A1C95ECC,
+        0x6037242B_8FA79C31,
     ]);
 
     const BITS: usize = 320;
 
     fn order() -> BigUint {
         BigUint::from_slice(&[
-            0xD0364141, 0xBFD25E8C, 0xAF48A03B, 0xBAAEDCE6, 0xFFFFFFFE, 0xFFFFFFFF, 0xFFFFFFFF,
-            0xFFFFFFFF,
+            0x948BFFE0,
+            0xE80FD996,
+            0xD724A09C,
+            0xE8885C39,
+            0xCFB80639,
+            0x7FFFFFE6,
+            0x00000016,
+            0x7FFFFFF1,
+            0x80000007,
+            0x7FFFFFFD,
         ])
     }
     fn characteristic() -> BigUint {
@@ -131,7 +138,7 @@ impl Field for EcGFp5Scalar {
         Self(
             val.to_u64_digits()
                 .into_iter()
-                .pad_using(4, |_| 0)
+                .pad_using(5, |_| 0)
                 .collect::<Vec<_>>()[..]
                 .try_into()
                 .expect("error converting to u64 array"),
@@ -140,17 +147,17 @@ impl Field for EcGFp5Scalar {
 
     #[inline]
     fn from_canonical_u64(n: u64) -> Self {
-        Self([n, 0, 0, 0])
+        Self([n, 0, 0, 0, 0])
     }
 
     #[inline]
     fn from_noncanonical_u128(n: u128) -> Self {
-        Self([n as u64, (n >> 64) as u64, 0, 0])
+        Self([n as u64, (n >> 64) as u64, 0, 0, 0])
     }
 
     #[inline]
     fn from_noncanonical_u96(n: (u64, u32)) -> Self {
-        Self([n.0, n.1 as u64, 0, 0])
+        Self([n.0, n.1 as u64, 0, 0, 0])
     }
 }
 
@@ -264,5 +271,5 @@ impl DivAssign for EcGFp5Scalar {
 mod tests {
     use crate::test_field_arithmetic;
 
-    test_field_arithmetic!(crate::secp256k1_scalar::EcGFp5Scalar);
+    test_field_arithmetic!(crate::scalar_field::EcGFp5Scalar);
 }
