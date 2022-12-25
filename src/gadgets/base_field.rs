@@ -79,7 +79,11 @@ pub trait CircuitBuilderQuinticExt<F: RichField + Extendable<5>> {
     ) -> QuinticExtensionTarget;
     fn inverse_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget;
     fn any_sqrt_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget;
+    fn try_any_sqrt_quintic_ext(&mut self, x: QuinticExtensionTarget) -> (QuinticExtensionTarget, BoolTarget);
+    fn try_canonical_sqrt_quintic_ext(&mut self, x: QuinticExtensionTarget) -> (QuinticExtensionTarget, BoolTarget);
     fn canonical_sqrt_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget;
+
+    fn legendre_sym_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget;
     fn sgn0_quintic_ext(&mut self, x: QuinticExtensionTarget) -> BoolTarget;
 
     fn square_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget;
@@ -423,13 +427,19 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
     }
 
     fn any_sqrt_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget {
+        let (root_x, _) = self.try_any_sqrt_quintic_ext(x);
+        root_x
+    }
+
+    fn try_any_sqrt_quintic_ext(&mut self, x: QuinticExtensionTarget) -> (QuinticExtensionTarget, BoolTarget) {
         let root_x = self.add_virtual_quintic_ext_target();
-        self.add_simple_generator(QuinticSqrtGenerator::new(x, root_x));
+        let is_sqrt = self.add_virtual_bool_target_unsafe();
+        self.add_simple_generator(QuinticSqrtGenerator::new(x, root_x, is_sqrt));
 
         let should_be_x = self.square_quintic_ext(root_x);
         self.connect_quintic_ext(should_be_x, x);
 
-        root_x
+        (root_x, is_sqrt)
     }
 
     /// returns true or false indicating a notion of "sign" for quintic_ext.
@@ -472,6 +482,16 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
 
         let sign = self.sgn0_quintic_ext(root_x);
         self.select_quintic_ext(sign, root_x, neg_root_x)
+    }
+
+    fn try_canonical_sqrt_quintic_ext(&mut self, x: QuinticExtensionTarget) -> (QuinticExtensionTarget, BoolTarget) {
+        let (root_x, is_sqrt) = self.try_any_sqrt_quintic_ext(x);
+        let neg_root_x = self.neg_quintic_ext(root_x);
+
+        let sign = self.sgn0_quintic_ext(root_x);
+        let canonical_root_x = self.select_quintic_ext(sign, root_x, neg_root_x);
+
+        (canonical_root_x, is_sqrt)
     }
 
     // TODO optimize
@@ -557,29 +577,42 @@ impl<F: RichField + Extendable<5>> SimpleGenerator<F> for QuinticQuotientGenerat
 pub struct QuinticSqrtGenerator {
     x: QuinticExtensionTarget,
     root_x: QuinticExtensionTarget,
+    is_not_sqrt: BoolTarget,
 }
 
 impl QuinticSqrtGenerator {
-    pub fn new(x: QuinticExtensionTarget, root_x: QuinticExtensionTarget) -> Self {
-        QuinticSqrtGenerator { x, root_x }
+    pub fn new(x: QuinticExtensionTarget, root_x: QuinticExtensionTarget, is_sqrt: BoolTarget) -> Self {
+        QuinticSqrtGenerator { x, root_x, is_not_sqrt: is_sqrt }
     }
 }
 
 impl<F: RichField + Extendable<5>> SimpleGenerator<F> for QuinticSqrtGenerator {
     fn dependencies(&self) -> Vec<Target> {
-        self.x.to_target_array().to_vec()
+        let mut res = self.x.to_target_array().to_vec();
+        res.push(self.is_not_sqrt.target);
+
+        res
     }
 
     fn run_once(&self, witness: &PartitionWitness<F>, out_buffer: &mut GeneratedValues<F>) {
         let x_limbs = self.x.to_target_array().map(|t| witness.get_target(t));
         let x = QuinticExtension::<F>::from_basefield_array(x_limbs);
 
-        let root_x = canonical_sqrt_quintic_ext(x).expect("not a square!");
-
-        for (lhs, rhs) in self.root_x.to_target_array().into_iter().zip(
-            <QuinticExtension<F> as FieldExtension<5>>::to_basefield_array(&root_x).into_iter(),
-        ) {
-            out_buffer.set_target(lhs, rhs);
+        match canonical_sqrt_quintic_ext(x) {
+            Some(root_x) => {
+                for (lhs, rhs) in self.root_x.to_target_array().into_iter().zip(
+                    <QuinticExtension<F> as FieldExtension<5>>::to_basefield_array(&root_x).into_iter(),
+                ) {
+                    out_buffer.set_target(lhs, rhs);
+                }
+                out_buffer.set_target(self.is_not_sqrt.target, F::ZERO);
+            }
+            None => {
+                for limb in self.root_x.to_target_array().into_iter() {
+                    out_buffer.set_target(limb, F::ZERO);
+                }
+                out_buffer.set_target(self.is_not_sqrt.target, F::ONE);
+            }
         }
     }
 }
