@@ -1,4 +1,5 @@
 use crate::gadgets::base_field::{CircuitBuilderQuinticExt, QuinticExtensionTarget};
+use crate::scalar_field::EcGFp5Scalar;
 use num::{BigUint, FromPrimitive, Zero};
 use plonky2::{field::extension::quintic::QuinticExtension, iop::target::Target};
 use plonky2::field::extension::{Extendable, FieldExtension};
@@ -8,6 +9,7 @@ use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::BoolTarget;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2_ecdsa::gadgets::biguint::{BigUintTarget, CircuitBuilderBiguint};
+use plonky2_ecdsa::gadgets::nonnative::{NonNativeTarget, CircuitBuilderNonNative};
 
 fn curve_a<F: RichField + Extendable<5>>() -> QuinticExtension<F> {
     let a = QuinticExtension::<F>::from_canonical_u16(2);
@@ -48,14 +50,14 @@ pub trait CircuitBuilderCurve<F: RichField + Extendable<5>> {
     fn curve_zero(&mut self) -> CurveTarget;
     fn curve_generator(&mut self) -> CurveTarget;
     fn curve_select(&mut self, cond: BoolTarget, a: CurveTarget, b: CurveTarget) -> CurveTarget;
-    fn curve_random_access(&mut self, access_index: Target, v: Vec<CurveTarget>) -> CurveTarget;
+    fn curve_random_access(&mut self, access_index: Target, v: &[CurveTarget]) -> CurveTarget;
 
     fn curve_add(&mut self, a: CurveTarget, b: CurveTarget) -> CurveTarget;
     fn curve_double(&mut self, a: CurveTarget) -> CurveTarget;
-    fn curve_scalar_mul(&mut self, a: CurveTarget, scalar: BigUintTarget) -> CurveTarget;
+    fn curve_scalar_mul(&mut self, a: CurveTarget, scalar: NonNativeTarget<EcGFp5Scalar>) -> CurveTarget;
 
     fn curve_encode_to_quintic_ext(&mut self, a: CurveTarget) -> QuinticExtensionTarget;
-    fn curve_decode_from_quintic_ext(&mut self, a: QuinticExtensionTarget) -> CurveTarget;
+    fn curve_decode_from_quintic_ext(&mut self, w: QuinticExtensionTarget) -> CurveTarget;
 }
 
 impl<F: RichField + Extendable<5> + Extendable<D>, const D: usize> CircuitBuilderCurve<F>
@@ -120,11 +122,11 @@ impl<F: RichField + Extendable<5> + Extendable<D>, const D: usize> CircuitBuilde
         ))
     }
 
-    fn curve_random_access(&mut self, access_index: Target, v: Vec<CurveTarget>) -> CurveTarget {
-        let xs = Vec::new();
-        let ys = Vec::new();
-        let is_infs = Vec::new();
-        for CurveTarget(([x, y], is_inf)) in v {
+    fn curve_random_access(&mut self, access_index: Target, v: &[CurveTarget]) -> CurveTarget {
+        let mut xs = Vec::new();
+        let mut ys = Vec::new();
+        let mut is_infs = Vec::new();
+        for &CurveTarget(([x, y], is_inf)) in v {
             xs.push(x);
             ys.push(y);
             is_infs.push(is_inf.target);
@@ -132,8 +134,8 @@ impl<F: RichField + Extendable<5> + Extendable<D>, const D: usize> CircuitBuilde
 
         CurveTarget((
             [
-                self.random_access_quintic_ext(access_index, xs),
-                self.random_access_quintic_ext(access_index, ys)
+                self.random_access_quintic_ext(access_index, &xs),
+                self.random_access_quintic_ext(access_index, &ys)
             ],
             BoolTarget::new_unsafe(self.random_access(access_index, is_infs))
         ))
@@ -147,13 +149,13 @@ impl<F: RichField + Extendable<5> + Extendable<D>, const D: usize> CircuitBuilde
         let sx = self.is_equal_quintic_ext(x1, x2);
         let sy = self.is_equal_quintic_ext(y1, y2);
 
-        let lambda_0_if_sx_0 = self.sub_quintic_ext(y2, y1);
-        let mut lambda_0_if_sx_1 = self.square_quintic_ext(x1);
+        let mut lambda_0_if_sx_0 = self.sub_quintic_ext(y2, y1);
+        let lambda_0_if_sx_1 = self.square_quintic_ext(x1);
         lambda_0_if_sx_0 = self.mul_const_quintic_ext(three, lambda_0_if_sx_0);
         lambda_0_if_sx_0 = self.add_const_quintic_ext(lambda_0_if_sx_0, curve_a());
 
         let lambda_1_if_sx_0 = self.add_quintic_ext(y1, y1);
-        let mut lambda_1_if_sx_1 = self.sub_quintic_ext(x2, x1);
+        let lambda_1_if_sx_1 = self.sub_quintic_ext(x2, x1);
 
         // note: paper has a typo. select opposite what the paper says
         let lambda_0 = self.select_quintic_ext(sx, lambda_0_if_sx_0, lambda_0_if_sx_1);
@@ -182,22 +184,23 @@ impl<F: RichField + Extendable<5> + Extendable<D>, const D: usize> CircuitBuilde
 
     /// a: the point to multiply by
     /// b: little-endian bit representation of the scalar (i.e. least-significant first)
-    fn curve_scalar_mul(&mut self, a: CurveTarget, scalar: BigUintTarget) -> CurveTarget {
+    fn curve_scalar_mul(&mut self, a: CurveTarget, scalar: NonNativeTarget<EcGFp5Scalar>) -> CurveTarget {
         const WINDOW_BITS: usize = 4;
         let zero = self.zero();
         let one = self.one();
 		let n = self.constant_biguint(&scalar_field_order());
 		let max_digit = self.constant(F::from_canonical_u64(1 << WINDOW_BITS));
 
-		let reduced_scalar = self.rem_biguint(&scalar, &n);
+        let scalar_bigint = self.nonnative_to_canonical_biguint(&scalar);
+		let reduced_scalar = self.rem_biguint(&scalar_bigint, &n);
 		let scalar = self.add_biguint(&reduced_scalar, &n);
-        let mut scalar_bits = scalar.limbs.into_iter().flat_map(|limb| self.split_le(limb.0, 32)).collect::<Vec<_>>();
+        let scalar_bits = scalar.limbs.into_iter().flat_map(|limb| self.split_le(limb.0, 32)).collect::<Vec<_>>();
 
         let mut signs = Vec::new();
         let mut digits = Vec::new();
         let mut carry = self.constant_bool(false);
         for chunk in scalar_bits.chunks_exact(WINDOW_BITS) {
-            let terms = (0..WINDOW_BITS-1).map(|i| self.mul_const(F::from_canonical_u32(1 << i), chunk[i].target));
+            let terms = (0..WINDOW_BITS-1).map(|i| self.mul_const(F::from_canonical_u32(1 << i), chunk[i].target)).collect::<Vec<_>>();
             let lower_bits = self.add_many(terms);
             
             let mut d_if_lte_8 = self.mul_const_add(F::from_canonical_u32(1 << (WINDOW_BITS - 1)), chunk[WINDOW_BITS - 1].target, lower_bits);
@@ -242,20 +245,62 @@ impl<F: RichField + Extendable<5> + Extendable<D>, const D: usize> CircuitBuilde
                 q = self.curve_double(q);
             }
 
-            let lookup_res = self.curve_random_access(magnitude, window);
+            let lookup_res = self.curve_random_access(magnitude, &window);
             q = self.curve_add(q, lookup_res);
         }
 
         q
     }
 
+    // TODO: optimize to use base field when we know it's in the base field
     fn curve_encode_to_quintic_ext(&mut self, a: CurveTarget) -> QuinticExtensionTarget {
         let CurveTarget(([x, y], is_inf))  = a;
-        let adiv3 = self.constant_quintic_ext(QuinticExtension::<F>::from_canonical_u16(2));
+        let adiv3 = self.constant_quintic_ext(QuinticExtension::<F>::TWO / QuinticExtension::<F>::from_canonical_u16(3));
         let denom = self.sub_quintic_ext(adiv3, x);
-        let w = self.div_quintic_ext(x, y);
+        let w = self.div_quintic_ext(y, denom);
 
         let zero = self.zero_quintic_ext();
         self.select_quintic_ext(is_inf, zero, w)
+    }
+
+    // TODO: optimize to use base field when we know it's in the base field
+    fn curve_decode_from_quintic_ext(&mut self, w: QuinticExtensionTarget) -> CurveTarget {
+        let one = self.one();
+        let zero_quintic_ext = self.zero_quintic_ext();
+        let a = self.constant_quintic_ext(QuinticExtension::<F>::TWO);
+        let b = self.constant_quintic_ext(
+            QuinticExtension::<F>::from_basefield_array([F::ZERO, F::from_canonical_u32(263), F::ZERO, F::ZERO, F::ZERO])
+        );
+        let bmul4 = self.mul_const_quintic_ext(QuinticExtension::<F>::from_canonical_u32(4), b);
+
+        let mut e = self.square_quintic_ext(w);
+        e = self.sub_quintic_ext(e, a);
+
+        let mut delta = self.square_quintic_ext(e);
+        delta = self.sub_quintic_ext(delta, bmul4);
+
+        let (r, is_sqrt) = self.try_canonical_sqrt_quintic_ext(delta);
+
+        let mut x1 = self.add_quintic_ext(e, r);
+        x1 = self.div_const_quintic_ext(x1, QuinticExtension::<F>::TWO);
+
+        let mut x2 = self.sub_quintic_ext(e, r);
+        x2 = self.div_const_quintic_ext(x2, QuinticExtension::<F>::TWO);
+
+        let legendre_x1 = self.legendre_sym_quintic_ext(x1);
+        let legendre_is_one = self.is_equal(legendre_x1, one);
+        let x = self.select_quintic_ext(legendre_is_one, x2, x1);
+
+        let negw = self.neg_quintic_ext(w);
+        let y = self.mul_quintic_ext(negw, x);
+
+        // is infinity if w is zero or delta is not a square
+        let w_is_zero = self.is_equal_quintic_ext(w, zero_quintic_ext);
+        let both = self.mul(w_is_zero.target, is_sqrt.target);
+        let mut is_inf = self.add(w_is_zero.target, is_sqrt.target);
+        is_inf = self.sub(is_inf, both);
+
+        let x = self.add_const_quintic_ext(x, QuinticExtension::<F>::TWO / QuinticExtension::<F>::from_canonical_u16(3));
+        CurveTarget(([x, y], BoolTarget::new_unsafe(is_inf)))
     }
 }

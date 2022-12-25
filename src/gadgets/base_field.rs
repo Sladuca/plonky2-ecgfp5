@@ -38,7 +38,7 @@ pub trait CircuitBuilderQuinticExt<F: RichField + Extendable<5>> {
         a: QuinticExtensionTarget,
         b: QuinticExtensionTarget,
     ) -> QuinticExtensionTarget;
-    fn random_access_quintic_ext(&mut self, access_index: Target, v: Vec<QuinticExtensionTarget>) -> QuinticExtensionTarget;
+    fn random_access_quintic_ext(&mut self, access_index: Target, v: &[QuinticExtensionTarget]) -> QuinticExtensionTarget;
     fn is_equal_quintic_ext(
         &mut self,
         a: QuinticExtensionTarget,
@@ -77,14 +77,21 @@ pub trait CircuitBuilderQuinticExt<F: RichField + Extendable<5>> {
         a: QuinticExtensionTarget,
         b: QuinticExtensionTarget,
     ) -> QuinticExtensionTarget;
+    fn div_const_quintic_ext(
+        &mut self,
+        a: QuinticExtensionTarget,
+        c: QuinticExtension<F>,
+    ) -> QuinticExtensionTarget;
     fn inverse_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget;
     fn any_sqrt_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget;
     fn try_any_sqrt_quintic_ext(&mut self, x: QuinticExtensionTarget) -> (QuinticExtensionTarget, BoolTarget);
     fn try_canonical_sqrt_quintic_ext(&mut self, x: QuinticExtensionTarget) -> (QuinticExtensionTarget, BoolTarget);
     fn canonical_sqrt_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget;
 
-    fn legendre_sym_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget;
     fn sgn0_quintic_ext(&mut self, x: QuinticExtensionTarget) -> BoolTarget;
+    fn legendre_sym_quintic_ext(&mut self, x: QuinticExtensionTarget) -> Target;
+    fn frob_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget;
+    fn frob2_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget;
 
     fn square_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget;
     fn add_many_quintic_ext(
@@ -235,13 +242,13 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
         ])
     }
 
-    fn random_access_quintic_ext(&mut self, access_index: Target, v: Vec<QuinticExtensionTarget>) -> QuinticExtensionTarget {
+    fn random_access_quintic_ext(&mut self, access_index: Target, v: &[QuinticExtensionTarget]) -> QuinticExtensionTarget {
         let mut a0s = Vec::new();
         let mut a1s = Vec::new();
         let mut a2s = Vec::new();
         let mut a3s = Vec::new();
         let mut a4s = Vec::new();
-        for QuinticExtensionTarget([a0, a1, a2, a3, a4]) in v {
+        for &QuinticExtensionTarget([a0, a1, a2, a3, a4]) in v {
             a0s.push(a0);
             a1s.push(a1);
             a2s.push(a2);
@@ -415,6 +422,16 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
         quotient
     }
 
+    /// returns `a / b` is `b` is nonzero, `0` otherwise
+    fn div_const_quintic_ext(
+        &mut self,
+        num: QuinticExtensionTarget,
+        denom: QuinticExtension<F>,
+    ) -> QuinticExtensionTarget {    
+        let denom = self.constant_quintic_ext(denom);
+        self.div_quintic_ext(num, denom)
+    }
+
     fn inverse_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget {
         let one = self.one_quintic_ext();
         let inverse = self.add_virtual_quintic_ext_target();
@@ -473,6 +490,56 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
         }
 
         sign
+    }
+
+    fn legendre_sym_quintic_ext(&mut self, x: QuinticExtensionTarget) -> Target {
+        // compute x^r where r = p^4 + p^3 + p^2 + p + 1
+        let frob1 = self.frob_quintic_ext(x);
+        let frob2 = self.frob2_quintic_ext(x);
+        let frob1_times_frob2 = self.mul_quintic_ext(frob1, frob2);
+        let frob2_frob1_times_frob2 = self.frob_quintic_ext(frob1_times_frob2);
+        let x_to_r_minus_1 = self.mul_quintic_ext(frob1_times_frob2, frob2_frob1_times_frob2);
+        let x_to_r_quintic = self.mul_quintic_ext(x_to_r_minus_1, x);
+
+        // x^r guaranteed to be in base field
+        let QuinticExtensionTarget([y, _, _, _, _]) = x_to_r_quintic;
+
+        let y31 = self.exp_power_of_2(y, 31);
+        let y63 = self.exp_power_of_2(y31, 32);
+
+        self.div(y63, y31)
+    }
+
+    fn frob_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget {
+        let FROB_COEFF_1 = F::from_canonical_u64(1041288259238279555);
+        let FROB_COEFF_2 = F::from_canonical_u64(15820824984080659046);
+        let FROB_COEFF_3 = F::from_canonical_u64(211587555138949697);
+        let FROB_COEFF_4 = F::from_canonical_u64(1373043270956696022);
+
+        let QuinticExtensionTarget([c0, mut c1, mut c2, mut c3, mut c4]) = x;
+
+        c1 = self.mul_const(FROB_COEFF_1, c1);
+        c2 = self.mul_const(FROB_COEFF_2, c2);
+        c3 = self.mul_const(FROB_COEFF_3, c3);
+        c4 = self.mul_const(FROB_COEFF_4, c4);
+
+        QuinticExtensionTarget([c0, c1, c2, c3, c4])
+    }
+
+    fn frob2_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget {
+        let FROB2_COEFF_1 = F::from_canonical_u64(15820824984080659046);
+        let FROB2_COEFF_2 = F::from_canonical_u64(1373043270956696022);
+        let FROB2_COEFF_3 = F::from_canonical_u64(1041288259238279555);
+        let FROB2_COEFF_4 = F::from_canonical_u64(211587555138949697);
+
+        let QuinticExtensionTarget([c0, mut c1, mut c2, mut c3, mut c4]) = x;
+
+        c1 = self.mul_const(FROB2_COEFF_1, c1);
+        c2 = self.mul_const(FROB2_COEFF_2, c2);
+        c3 = self.mul_const(FROB2_COEFF_3, c3);
+        c4 = self.mul_const(FROB2_COEFF_4, c4);
+
+        QuinticExtensionTarget([c0, c1, c2, c3, c4])
     }
 
     // returns the sqrt(x) such that `sgn0(sqrt(x)) == true`
@@ -577,19 +644,19 @@ impl<F: RichField + Extendable<5>> SimpleGenerator<F> for QuinticQuotientGenerat
 pub struct QuinticSqrtGenerator {
     x: QuinticExtensionTarget,
     root_x: QuinticExtensionTarget,
-    is_not_sqrt: BoolTarget,
+    is_sqrt: BoolTarget,
 }
 
 impl QuinticSqrtGenerator {
     pub fn new(x: QuinticExtensionTarget, root_x: QuinticExtensionTarget, is_sqrt: BoolTarget) -> Self {
-        QuinticSqrtGenerator { x, root_x, is_not_sqrt: is_sqrt }
+        QuinticSqrtGenerator { x, root_x, is_sqrt }
     }
 }
 
 impl<F: RichField + Extendable<5>> SimpleGenerator<F> for QuinticSqrtGenerator {
     fn dependencies(&self) -> Vec<Target> {
         let mut res = self.x.to_target_array().to_vec();
-        res.push(self.is_not_sqrt.target);
+        res.push(self.is_sqrt.target);
 
         res
     }
@@ -605,13 +672,13 @@ impl<F: RichField + Extendable<5>> SimpleGenerator<F> for QuinticSqrtGenerator {
                 ) {
                     out_buffer.set_target(lhs, rhs);
                 }
-                out_buffer.set_target(self.is_not_sqrt.target, F::ZERO);
+                out_buffer.set_target(self.is_sqrt.target, F::ONE);
             }
             None => {
                 for limb in self.root_x.to_target_array().into_iter() {
                     out_buffer.set_target(limb, F::ZERO);
                 }
-                out_buffer.set_target(self.is_not_sqrt.target, F::ONE);
+                out_buffer.set_target(self.is_sqrt.target, F::ZERO);
             }
         }
     }
