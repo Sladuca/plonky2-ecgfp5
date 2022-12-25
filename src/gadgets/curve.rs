@@ -245,8 +245,10 @@ impl<F: RichField + Extendable<5> + Extendable<D>, const D: usize> CircuitBuilde
                 q = self.curve_double(q);
             }
 
-            let lookup_res = self.curve_random_access(magnitude, &window);
-            q = self.curve_add(q, lookup_res);
+            let CurveTarget(([x, mut y], is_inf)) = self.curve_random_access(magnitude, &window);
+            let neg_y = self.neg_quintic_ext(y);
+            y = self.select_quintic_ext(sign, neg_y, y);
+            q = self.curve_add(q, CurveTarget(([x, y], is_inf)));
         }
 
         q
