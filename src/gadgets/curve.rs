@@ -8,7 +8,7 @@ use plonky2::field::types::Field;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::BoolTarget;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2_ecdsa::gadgets::biguint::{BigUintTarget, CircuitBuilderBiguint};
+use plonky2_ecdsa::gadgets::biguint::CircuitBuilderBiguint;
 use plonky2_ecdsa::gadgets::nonnative::{NonNativeTarget, CircuitBuilderNonNative};
 
 fn curve_a<F: RichField + Extendable<5>>() -> QuinticExtension<F> {

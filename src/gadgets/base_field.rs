@@ -7,7 +7,7 @@ use plonky2::field::types::Field;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::generator::{GeneratedValues, SimpleGenerator};
 use plonky2::iop::target::{BoolTarget, Target};
-use plonky2::iop::witness::{PartitionWitness, Witness};
+use plonky2::iop::witness::{PartitionWitness, Witness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -449,12 +449,14 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
     }
 
     fn try_any_sqrt_quintic_ext(&mut self, x: QuinticExtensionTarget) -> (QuinticExtensionTarget, BoolTarget) {
+        let zero = self.zero_quintic_ext();
         let root_x = self.add_virtual_quintic_ext_target();
         let is_sqrt = self.add_virtual_bool_target_unsafe();
         self.add_simple_generator(QuinticSqrtGenerator::new(x, root_x, is_sqrt));
 
-        let should_be_x = self.square_quintic_ext(root_x);
-        self.connect_quintic_ext(should_be_x, x);
+        let should_be_x_or_zero = self.square_quintic_ext(root_x);
+        let x_or_zero = self.select_quintic_ext(is_sqrt, x, zero);
+        self.connect_quintic_ext(should_be_x_or_zero, x_or_zero);
 
         (root_x, is_sqrt)
     }
@@ -511,44 +513,44 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
     }
 
     fn frob_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget {
-        let FROB_COEFF_1 = F::from_canonical_u64(1041288259238279555);
-        let FROB_COEFF_2 = F::from_canonical_u64(15820824984080659046);
-        let FROB_COEFF_3 = F::from_canonical_u64(211587555138949697);
-        let FROB_COEFF_4 = F::from_canonical_u64(1373043270956696022);
+        let frob_coeff_1 = F::from_canonical_u64(1041288259238279555);
+        let frob_coeff_2 = F::from_canonical_u64(15820824984080659046);
+        let frob_coeff_3 = F::from_canonical_u64(211587555138949697);
+        let frob_coeff_4 = F::from_canonical_u64(1373043270956696022);
 
         let QuinticExtensionTarget([c0, mut c1, mut c2, mut c3, mut c4]) = x;
 
-        c1 = self.mul_const(FROB_COEFF_1, c1);
-        c2 = self.mul_const(FROB_COEFF_2, c2);
-        c3 = self.mul_const(FROB_COEFF_3, c3);
-        c4 = self.mul_const(FROB_COEFF_4, c4);
+        c1 = self.mul_const(frob_coeff_1, c1);
+        c2 = self.mul_const(frob_coeff_2, c2);
+        c3 = self.mul_const(frob_coeff_3, c3);
+        c4 = self.mul_const(frob_coeff_4, c4);
 
         QuinticExtensionTarget([c0, c1, c2, c3, c4])
     }
 
     fn frob2_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget {
-        let FROB2_COEFF_1 = F::from_canonical_u64(15820824984080659046);
-        let FROB2_COEFF_2 = F::from_canonical_u64(1373043270956696022);
-        let FROB2_COEFF_3 = F::from_canonical_u64(1041288259238279555);
-        let FROB2_COEFF_4 = F::from_canonical_u64(211587555138949697);
+        let frob2_coeff_1 = F::from_canonical_u64(15820824984080659046);
+        let frob2_coeff_2 = F::from_canonical_u64(1373043270956696022);
+        let frob2_coeff_3 = F::from_canonical_u64(1041288259238279555);
+        let frob2_coeff_4 = F::from_canonical_u64(211587555138949697);
 
         let QuinticExtensionTarget([c0, mut c1, mut c2, mut c3, mut c4]) = x;
 
-        c1 = self.mul_const(FROB2_COEFF_1, c1);
-        c2 = self.mul_const(FROB2_COEFF_2, c2);
-        c3 = self.mul_const(FROB2_COEFF_3, c3);
-        c4 = self.mul_const(FROB2_COEFF_4, c4);
+        c1 = self.mul_const(frob2_coeff_1, c1);
+        c2 = self.mul_const(frob2_coeff_2, c2);
+        c3 = self.mul_const(frob2_coeff_3, c3);
+        c4 = self.mul_const(frob2_coeff_4, c4);
 
         QuinticExtensionTarget([c0, c1, c2, c3, c4])
     }
 
-    // returns the sqrt(x) such that `sgn0(sqrt(x)) == true`
+    // returns the sqrt(x) such that `sgn0(sqrt(x)) == false`
     fn canonical_sqrt_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget {
         let root_x = self.any_sqrt_quintic_ext(x);
         let neg_root_x = self.neg_quintic_ext(root_x);
 
         let sign = self.sgn0_quintic_ext(root_x);
-        self.select_quintic_ext(sign, root_x, neg_root_x)
+        self.select_quintic_ext(sign, neg_root_x, root_x)
     }
 
     fn try_canonical_sqrt_quintic_ext(&mut self, x: QuinticExtensionTarget) -> (QuinticExtensionTarget, BoolTarget) {
@@ -556,7 +558,7 @@ impl<F: RichField + Extendable<D> + Extendable<5>, const D: usize> CircuitBuilde
         let neg_root_x = self.neg_quintic_ext(root_x);
 
         let sign = self.sgn0_quintic_ext(root_x);
-        let canonical_root_x = self.select_quintic_ext(sign, root_x, neg_root_x);
+        let canonical_root_x = self.select_quintic_ext(sign, neg_root_x, root_x);
 
         (canonical_root_x, is_sqrt)
     }
@@ -655,10 +657,7 @@ impl QuinticSqrtGenerator {
 
 impl<F: RichField + Extendable<5>> SimpleGenerator<F> for QuinticSqrtGenerator {
     fn dependencies(&self) -> Vec<Target> {
-        let mut res = self.x.to_target_array().to_vec();
-        res.push(self.is_sqrt.target);
-
-        res
+        self.x.to_target_array().to_vec()
     }
 
     fn run_once(&self, witness: &PartitionWitness<F>, out_buffer: &mut GeneratedValues<F>) {
@@ -747,6 +746,26 @@ mod tests {
     use rand::thread_rng;
 
     use super::*;
+
+    fn find_non_square<F: RichField + Extendable<5>>() -> QuinticExtension<F> {
+        let mut rng = thread_rng();
+        loop {
+            let attempt = QuinticExtension::<F>::sample(&mut rng);
+            if let None = sqrt_quintic_ext(attempt) {
+                return attempt
+            }
+        }
+    }
+
+    fn find_sgn0_eq_0<F: RichField + Extendable<5>>() -> QuinticExtension<F> {
+        let mut rng = thread_rng();
+        loop {
+            let attempt = QuinticExtension::<F>::sample(&mut rng);
+            if false == quintic_ext_sgn0(attempt) {
+                return attempt
+            }
+        }
+    }
 
     #[test]
     fn test_add() -> Result<()> {
@@ -926,6 +945,28 @@ mod tests {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
+
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+
+        let x = find_sgn0_eq_0();
+        let square_expected = x * x;
+
+        let square = builder.constant_quintic_ext(square_expected);
+        builder.canonical_sqrt_quintic_ext(square);
+
+        let circuit = builder.build::<C>();
+
+        let pw = PartialWitness::new();
+        let proof = circuit.prove(pw)?;
+        circuit.verify(proof)
+    }
+
+    #[test]
+    fn test_try_any_sqrt_quintic_ext() -> Result<()> {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
         type GFp5 = QuinticExtension<F>;
 
         let mut rng = thread_rng();
@@ -933,11 +974,55 @@ mod tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
+        let zero = builder.zero_quintic_ext();
+        let true_target = builder.constant_bool(true);
+        let false_target = builder.constant_bool(false);
+
         let x = GFp5::sample(&mut rng);
         let square_expected = x * x;
 
         let square = builder.constant_quintic_ext(square_expected);
-        builder.canonical_sqrt_quintic_ext(square);
+        let (_, is_square) = builder.try_any_sqrt_quintic_ext(square);
+        builder.connect(true_target.target, is_square.target);
+
+        let non_square = find_non_square::<F>();
+        let non_square = builder.constant_quintic_ext(non_square);
+        let (should_be_zero, is_square) = builder.try_any_sqrt_quintic_ext(non_square);
+        builder.connect(false_target.target, is_square.target);
+        builder.connect_quintic_ext(should_be_zero, zero);
+
+        let circuit = builder.build::<C>();
+
+        let pw = PartialWitness::new();
+        let proof = circuit.prove(pw)?;
+        circuit.verify(proof)
+    }
+    #[test]
+
+    fn test_try_canonical_sqrt_quintic_ext() -> Result<()> {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+
+        let zero = builder.zero_quintic_ext();
+        let true_target = builder.constant_bool(true);
+        let false_target = builder.constant_bool(false);
+
+        let x = find_sgn0_eq_0();
+        let square_expected = x * x;
+
+        let square = builder.constant_quintic_ext(square_expected);
+        let (_, is_square) = builder.try_canonical_sqrt_quintic_ext(square);
+        builder.connect(true_target.target, is_square.target);
+
+        let non_square = find_non_square::<F>();
+        let non_square = builder.constant_quintic_ext(non_square);
+        let (should_be_zero, is_square) = builder.try_canonical_sqrt_quintic_ext(non_square);
+        builder.connect(false_target.target, is_square.target);
+        builder.connect_quintic_ext(should_be_zero, zero);
 
         let circuit = builder.build::<C>();
 
