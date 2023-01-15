@@ -19,12 +19,15 @@ impl Legendre<GFp> for QuinticExtension<GFp> {
         let frob1_times_frob2 = frob1 * frob2;
         let frob2_frob1_times_frob2 = frob1_times_frob2.repeated_frobenius(2);
 
-        let xr_ext = frob1_times_frob2 * frob2_frob1_times_frob2;
+        let xr_ext = *self * frob1_times_frob2 * frob2_frob1_times_frob2;
         let xr: GFp = <GFp5 as FieldExtension<5>>::to_basefield_array(&xr_ext)[0];
 
         let xr_31 = xr.exp_power_of_2(31);
         let xr_63 = xr_31.exp_power_of_2(32);
-        xr_63 / xr_31
+
+        // only way `xr_31` can be zero is if `xr` is zero, in which case `self` is zero, in which case we want to return zero.
+        let xr_31_inv_or_zero = xr_31.inverse_or_zero();
+        xr_63 * xr_31_inv_or_zero
     }
 }
 
@@ -42,6 +45,23 @@ impl SquareRoot for QuinticExtension<GFp> {
         canonical_sqrt_quintic_ext_goldilocks(*self)
     }
 }
+
+pub trait InverseOrZero: Sized {
+    fn inverse_or_zero(&self) -> Self;
+}
+
+impl InverseOrZero for GFp {
+    fn inverse_or_zero(&self) -> Self {
+        self.try_inverse().unwrap_or(GFp::ZERO)
+    }
+}
+
+impl InverseOrZero for GFp5 {
+    fn inverse_or_zero(&self) -> Self {
+        self.try_inverse().unwrap_or(QuinticExtension::ZERO)
+    }
+}
+
 
 pub trait Half {
     fn half(&self) -> Self;
@@ -139,9 +159,9 @@ pub(crate) fn canonical_sqrt_quintic_ext_goldilocks(x: GFp5) -> Option<GFp5> {
     match sqrt_quintic_ext_goldilocks(x) {
         Some(root_x) => {
             if quintic_ext_sgn0(root_x) {
-                Some(root_x)
-            } else {
                 Some(-root_x)
+            } else {
+                Some(root_x)
             }
         }
         None => None,
@@ -161,5 +181,66 @@ pub(crate) fn sqrt_quintic_ext_goldilocks(x: GFp5) -> Option<GFp5> {
     let g = x0 * f0 + GFp::from_canonical_u64(3) * (x1 * f4 + x2 * f3 + x3 * f2 + x4 * f1);
 
     g.sqrt()
-        .map(|s| e.try_inverse().unwrap_or(GFp5::ZERO) * s.into())
+        .map(|s| e.inverse_or_zero() * s.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use plonky2::plonk::config::{PoseidonGoldilocksConfig, GenericConfig};
+    use plonky2_field::types::Sample;
+    use rand::thread_rng;
+
+    use crate::curve::test_utils::gfp5_random_non_square;
+
+    use super::*;
+
+    #[test]
+    fn test_legendre() {
+        // test zero
+        assert_eq!(GFp::ZERO, GFp5::ZERO.legendre());
+
+        // test non-squares
+        for _ in 0..32 {
+            let x = gfp5_random_non_square();
+            let legendre_sym = x.legendre();
+
+            assert_eq!(legendre_sym, -GFp::ONE);
+        }
+
+        // test squares
+        for _ in 0..32 {
+            let x = GFp5::sample(&mut thread_rng());
+            let square = x * x;
+            let legendre_sym = square.legendre();
+
+            assert_eq!(legendre_sym, GFp::ONE);
+        }
+    }
+
+    #[test]
+    fn test_sqrt_quintic_ext_outside_circuit() {
+        let mut rng = thread_rng();
+
+        for _ in 0..30 {
+            let x = GFp5::sample(&mut rng);
+            let square = x * x;
+            let sqrt = square.sqrt().unwrap();
+
+            assert_eq!(sqrt * sqrt, square);
+        }
+    }
+
+    #[test]
+    fn test_canonical_sqrt_quintic_ext_outside_circuit() {
+        let mut rng = thread_rng();
+
+        for _ in 0..30 {
+            let x = GFp5::sample(&mut rng);
+            let square = x * x;
+            let sqrt = square.canonical_sqrt().unwrap();
+
+            assert_eq!(sqrt * sqrt, square);
+            assert!(!sqrt.sgn0())
+        }
+    }
 }

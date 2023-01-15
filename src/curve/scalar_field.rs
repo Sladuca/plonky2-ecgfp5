@@ -423,7 +423,7 @@ impl Scalar {
     ///  - If the decoded integer is lower than the group order, then that
     ///    value is returned as s, and c == 0xFFFFFFFFFFFFFFFF.
     ///  - Otherwise, s is set to Scalar::ZERO, and c == 0.
-    pub fn decode(buf: &[u8]) -> (Self, u64) {
+    pub fn try_from_noncanonical_bytes(buf: &[u8]) -> (Self, u64) {
         let n = buf.len();
         let mut r = Self::ZERO;
         let mut extra: u8 = 0;
@@ -455,17 +455,17 @@ impl Scalar {
     /// interpreted into an integer in little-endian unsigned convention.
     /// All slice bytes are read, and the value is REDUCED modulo n. This
     /// function never fails; it accepts arbitrary input values.
-    pub fn decode_reduce(buf: &[u8]) -> Self {
+    pub fn from_noncanonical_bytes(buf: &[u8]) -> Self {
         // We inject the value by chunks of 312 bits, in high-to-low
         // order. We multiply by 2^312 the intermediate result, which
         // is equivalent to performing a Montgomery multiplication
         // by 2^632 mod n.
 
-        // If buffer length is at most 39 bytes, then the plain decode()
+        // If buffer length is at most 39 bytes, then the plain try_from_noncanonical_bytes()
         // function works.
         let n = buf.len();
         if n <= 39 {
-            let (r, _) = Self::decode(buf);
+            let (r, _) = Self::try_from_noncanonical_bytes(buf);
             return r;
         }
 
@@ -475,10 +475,10 @@ impl Scalar {
         // n >= 40, this implies that k >= 1. We decode the top chunk
         // (which has length _at most_ 39 bytes) into acc.
         let mut k = ((n - 1) / 39) * 39;
-        let (mut acc, _) = Self::decode(&buf[k..n]);
+        let (mut acc, _) = Self::try_from_noncanonical_bytes(&buf[k..n]);
         while k > 0 {
             k -= 39;
-            let (b, _) = Self::decode(&buf[k..k + 39]);
+            let (b, _) = Self::try_from_noncanonical_bytes(&buf[k..k + 39]);
             acc = acc.montymul(Self::T632).add(b);
         }
         acc
@@ -953,11 +953,11 @@ impl Signed640 {
 
 #[cfg(test)]
 mod tests {
-    use super::super::PRNG;
+    use rand::{thread_rng, Rng};
     use super::Scalar;
 
     #[test]
-    fn scalar_ops() {
+    fn test_scalar_ops() {
         let buf1: [u8; 50] = [
             0xE0, 0xFF, 0x8B, 0x94, 0x96, 0xD9, 0x0F, 0xE8, 0x9C, 0xA0, 0x24, 0xD7, 0x39, 0x5C,
             0x88, 0xE8, 0x39, 0x06, 0xB8, 0xCF, 0xE6, 0xFF, 0xFF, 0x7F, 0x16, 0x00, 0x00, 0x00,
@@ -977,9 +977,9 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
         ];
         for i in 0..51 {
-            let (s1, c1) = Scalar::decode(&buf1[..i]);
-            let (s2, c2) = Scalar::decode(&buf2[..i]);
-            let (s3, c3) = Scalar::decode(&buf3[..i]);
+            let (s1, c1) = Scalar::try_from_noncanonical_bytes(&buf1[..i]);
+            let (s2, c2) = Scalar::try_from_noncanonical_bytes(&buf2[..i]);
+            let (s3, c3) = Scalar::try_from_noncanonical_bytes(&buf3[..i]);
             assert!(c1 == 0xFFFFFFFFFFFFFFFF);
             if i <= 40 {
                 assert!(s1.encode()[..i] == buf1[..i]);
@@ -1018,9 +1018,9 @@ mod tests {
             0x96, 0x5A, 0x0A, 0x4F, 0x0A, 0x27, 0x1A, 0x7A, 0xE8, 0x1D, 0x7D, 0xBF, 0xE3, 0xE3,
             0xFA, 0x5E, 0x17, 0xE0, 0x44, 0xD9, 0xA5, 0x37, 0x9B, 0xF8, 0x38, 0x74,
         ];
-        let s4 = Scalar::decode_reduce(&buf4[..]);
+        let s4 = Scalar::from_noncanonical_bytes(&buf4[..]);
         assert!(s4.encode() == buf5);
-        let (s5, c5) = Scalar::decode(&buf5[..]);
+        let (s5, c5) = Scalar::try_from_noncanonical_bytes(&buf5[..]);
         assert!(c5 == 0xFFFFFFFFFFFFFFFF);
         assert!(s5.encode() == buf5);
 
@@ -1059,12 +1059,12 @@ mod tests {
     }
 
     #[test]
-    fn lagrange() {
-        let mut prng = PRNG(0);
+    fn test_lagrange() {
+        let mut rng = thread_rng();
         for _ in 0..100 {
             let mut sbuf = [0u8; 48];
-            prng.next(&mut sbuf);
-            let s = Scalar::decode_reduce(&mut sbuf);
+            rng.fill(&mut sbuf);
+            let s = Scalar::from_noncanonical_bytes(&mut sbuf);
             let (v0, v1) = s.lagrange();
             let c0 = v0.to_scalar_vartime();
             let c1 = v1.to_scalar_vartime();

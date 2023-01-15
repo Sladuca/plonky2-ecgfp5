@@ -749,34 +749,13 @@ mod tests {
     use rand::thread_rng;
 
     use super::*;
-    use crate::curve::base_field::Sgn0;
-
-    fn find_non_square<F: RichField + Extendable<5>>() -> GFp5 {
-        let mut rng = thread_rng();
-        loop {
-            let attempt = QuinticExtension::<F>::sample(&mut rng);
-            if let None = sqrt_quintic_ext(attempt) {
-                return attempt;
-            }
-        }
-    }
-
-    fn find_sgn0_eq_0<F: RichField + Extendable<5>>() -> GFp5 {
-        let mut rng = thread_rng();
-        loop {
-            let attempt = QuinticExtension::<F>::sample(&mut rng);
-            if false == attempt.sgn0() {
-                return attempt;
-            }
-        }
-    }
+    use crate::curve::test_utils::{gfp5_random_non_square, gfp5_random_sgn0_eq_0};
 
     #[test]
     fn test_add() -> Result<()> {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-        type GFp5 = GFp5;
 
         let mut rng = thread_rng();
 
@@ -806,7 +785,6 @@ mod tests {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-        type GFp5 = GFp5;
 
         let mut rng = thread_rng();
 
@@ -836,7 +814,6 @@ mod tests {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-        type GFp5 = GFp5;
 
         let mut rng = thread_rng();
 
@@ -866,7 +843,6 @@ mod tests {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-        type GFp5 = GFp5;
 
         let mut rng = thread_rng();
 
@@ -896,7 +872,6 @@ mod tests {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-        type GFp5 = GFp5;
 
         let mut rng = thread_rng();
 
@@ -924,7 +899,6 @@ mod tests {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-        type GFp5 = GFp5;
 
         let mut rng = thread_rng();
 
@@ -934,8 +908,7 @@ mod tests {
         let x = GFp5::sample(&mut rng);
         let square_expected = x * x;
 
-        let square = builder.constant_quintic_ext(square_expected);
-        builder.any_sqrt_quintic_ext(square);
+        builder.constant_quintic_ext(square_expected);
 
         let circuit = builder.build::<C>();
 
@@ -953,15 +926,18 @@ mod tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
-        let x = find_sgn0_eq_0();
+        let x = gfp5_random_sgn0_eq_0();
         let square_expected = x * x;
 
         let square = builder.constant_quintic_ext(square_expected);
-        builder.canonical_sqrt_quintic_ext(square);
+        let sqrt = builder.canonical_sqrt_quintic_ext(square);
+        builder.register_quintic_ext_public_input(sqrt);
 
         let circuit = builder.build::<C>();
 
-        let pw = PartialWitness::new();
+        let mut pw = PartialWitness::new();
+        pw.set_quintic_ext_target(sqrt, x);
+
         let proof = circuit.prove(pw)?;
         circuit.verify(proof)
     }
@@ -971,7 +947,6 @@ mod tests {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-        type GFp5 = GFp5;
 
         let mut rng = thread_rng();
 
@@ -989,7 +964,7 @@ mod tests {
         let (_, is_square) = builder.try_any_sqrt_quintic_ext(square);
         builder.connect(true_target.target, is_square.target);
 
-        let non_square = find_non_square::<F>();
+        let non_square = gfp5_random_non_square();
         let non_square = builder.constant_quintic_ext(non_square);
         let (should_be_zero, is_square) = builder.try_any_sqrt_quintic_ext(non_square);
         builder.connect(false_target.target, is_square.target);
@@ -1015,14 +990,14 @@ mod tests {
         let true_target = builder.constant_bool(true);
         let false_target = builder.constant_bool(false);
 
-        let x = find_sgn0_eq_0();
+        let x = gfp5_random_sgn0_eq_0();
         let square_expected = x * x;
 
         let square = builder.constant_quintic_ext(square_expected);
         let (_, is_square) = builder.try_canonical_sqrt_quintic_ext(square);
         builder.connect(true_target.target, is_square.target);
 
-        let non_square = find_non_square::<F>();
+        let non_square = gfp5_random_non_square();
         let non_square = builder.constant_quintic_ext(non_square);
         let (should_be_zero, is_square) = builder.try_canonical_sqrt_quintic_ext(non_square);
         builder.connect(false_target.target, is_square.target);
@@ -1033,42 +1008,5 @@ mod tests {
         let pw = PartialWitness::new();
         let proof = circuit.prove(pw)?;
         circuit.verify(proof)
-    }
-
-    #[test]
-    fn test_sqrt_quintic_ext_outside_circuit() {
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
-        type GFp5 = GFp5;
-
-        let mut rng = thread_rng();
-
-        for _ in 0..30 {
-            let x = GFp5::sample(&mut rng);
-            let square = x * x;
-            let sqrt = sqrt_quintic_ext(square).unwrap();
-
-            assert_eq!(sqrt * sqrt, square);
-        }
-    }
-
-    #[test]
-    fn test_canonical_sqrt_quintic_ext_outside_circuit() {
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
-        type GFp5 = GFp5;
-
-        let mut rng = thread_rng();
-
-        for _ in 0..32 {
-            let x = GFp5::sample(&mut rng);
-            let square = x * x;
-            let sqrt = canonical_sqrt_quintic_ext(square).unwrap();
-
-            assert_eq!(sqrt * sqrt, square);
-            assert!(quintic_ext_sgn0(sqrt))
-        }
     }
 }

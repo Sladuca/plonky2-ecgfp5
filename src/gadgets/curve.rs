@@ -1,23 +1,14 @@
 use crate::curve::scalar_field::Scalar;
-use crate::curve::{GFp, GFp5};
+use crate::curve::{GFp, GFp5, curve::Point};
 use crate::gadgets::base_field::{CircuitBuilderGFp5, QuinticExtensionTarget};
 use num::{BigUint, FromPrimitive, Zero};
 use plonky2::field::extension::FieldExtension;
-use plonky2::field::ops::Square;
 use plonky2::field::types::{Field, Field64};
 use plonky2::iop::target::BoolTarget;
 use plonky2::iop::target::Target;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2_ecdsa::gadgets::biguint::CircuitBuilderBiguint;
 use plonky2_ecdsa::gadgets::nonnative::{CircuitBuilderNonNative, NonNativeTarget};
-
-fn curve_a() -> GFp5 {
-    let a = GFp5::from_canonical_u16(2);
-    let b = GFp5::from_canonical_u16(263);
-    let three = GFp5::from_canonical_u16(3);
-
-    (three * b - a.square()) / three
-}
 
 pub fn scalar_field_order() -> BigUint {
     let mut res = BigUint::from_u128(25 * 5 * 163 * 769 * 1059871).unwrap();
@@ -149,7 +140,7 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 let mut lambda_0_if_sx_0 = self.sub_quintic_ext(y2, y1);
                 let lambda_0_if_sx_1 = self.square_quintic_ext(x1);
                 lambda_0_if_sx_0 = self.mul_const_quintic_ext(three, lambda_0_if_sx_0);
-                lambda_0_if_sx_0 = self.add_const_quintic_ext(lambda_0_if_sx_0, curve_a());
+                lambda_0_if_sx_0 = self.add_const_quintic_ext(lambda_0_if_sx_0, Point::A_WEIRSTRASS);
 
                 let lambda_1_if_sx_0 = self.add_quintic_ext(y1, y1);
                 let lambda_1_if_sx_1 = self.sub_quintic_ext(x2, x1);

@@ -6,7 +6,6 @@ use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use alloc::vec::Vec;
 use plonky2_field::extension::quintic::QuinticExtension;
-use plonky2_field::extension::FieldExtension;
 use plonky2_field::goldilocks_field::GoldilocksField;
 use plonky2_field::ops::Square;
 use plonky2_field::types::Field;
@@ -16,6 +15,8 @@ use crate::curve::mul_table::*;
 use crate::curve::scalar_field::Scalar;
 
 use crate::curve::{GFp, GFp5};
+
+use super::base_field::InverseOrZero;
 
 /// A curve point.
 #[derive(Clone, Copy, Debug)]
@@ -29,21 +30,35 @@ pub struct Point {
     t: GFp5,
 }
 
-// A curve point in affine (x,u) coordinates. This is used internally
-// to make "windows" that speed up point multiplications.
-// this is also the representation used in-circuit
+/// A curve point in affine (x,u) coordinates. This is used internally
+/// to make "windows" that speed up point multiplications.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct AffinePoint {
     pub(crate) x: GFp5,
     pub(crate) u: GFp5,
 }
 
+
+/// A curve point in short Weirstrass form (x, y). This is used by the in-circuit representation
+#[derive(Clone, Copy, Debug)]
+pub struct ShortWeierstrassPoint {
+    pub(crate) x: GFp5,
+    pub(crate) y: GFp5,
+    pub(crate) is_inf: bool,
+}
+
 impl Point {
     // Curve equation 'a' constant.
     const A: GFp5 = QuinticExtension([GFp::TWO, GFp::ZERO, GFp::ZERO, GFp::ZERO, GFp::ZERO]);
 
+    // curve equation `A` constants when in short Weierstrass form
+    pub(crate) const A_WEIRSTRASS: GFp5 = QuinticExtension([GoldilocksField(6148914689804861439), GoldilocksField(263), GFp::ZERO, GFp::ZERO, GFp::ZERO]);
+
     // Curve equation 'b' constant is equal to B1*z as a u32
     const B1_U32: u32 = 263;
+
+    // curve equation `B` constant in short Weierstrass form
+    pub(crate) const B_WEIRSTRASS: GFp5 = QuinticExtension([GoldilocksField(15713893096167979237), GoldilocksField(6148914689804861265), GFp::ZERO, GFp::ZERO, GFp::ZERO]);
 
     /* unused
     // Curve equation 'b' constant.
@@ -99,7 +114,7 @@ impl Point {
         // Encoded form is the value w = 1/u. GFpor the neutral (u == 0),
         // the encoded form is 0. Since our inversion over GF(p^5) already
         // yields 0 in that case, there is no need for any special code.
-        self.t / self.u
+        self.t * self.u.inverse_or_zero()
     }
 
     /// Test whether a field element can be decoded into a point.
@@ -129,9 +144,9 @@ impl Point {
 
         let x1 = (e + r).half();
         let x2 = (e - r).half();
-        let x = if x1.legendre() == GFp::ONE { x1 } else { x2 };
+        let x = if x1.legendre() == GFp::ONE { x2 } else { x1 };
 
-        // If c == 0, then we want to get the neutral here; note that if
+        // If c == true (delta is not a sqrt) then we want to get the neutral here; note that if
         // w == 0, then delta = a^2 - 4*b, which is not a square, and
         // thus we also get c == 0.
         let x = if c { x } else { GFp5::ZERO };
@@ -147,18 +162,46 @@ impl Point {
         }
     }
 
+    pub fn to_weierstraass(&self) -> ShortWeierstrassPoint {
+        let w = self.encode();
+        Self::decode_to_weierstraass(w).unwrap()
+    }
+
+    pub fn decode_to_weierstraass(w: GFp5) -> Option<ShortWeierstrassPoint> {
+        let e = w.square() - Self::A;
+        let delta = e.square() - Self::B_MUL4;
+        let r = delta.sqrt();
+        let c = r.is_some();
+        let r = r.unwrap_or(GFp5::ZERO);
+
+        let x1 = (e + r).half();
+        let x2 = (e - r).half();
+        let x = if x1.legendre() == GFp::ONE { x1 } else { x2 };
+
+        let x = if c { x + Self::A / GFp5::from_canonical_u16(3) } else { GFp5::ZERO };
+        let y = -w * x;
+        let is_inf = !c;
+
+        // If w == 0 then this is in fact a success.
+        if c || w == GFp5::ZERO {
+            Some(ShortWeierstrassPoint { x, y, is_inf })
+        } else {
+            None
+        }
+    }
+
     // General point addition. GFpormulas are complete (no special case).
     fn set_add(&mut self, rhs: &Self) {
         // cost: 10M
-        let (x1, z1, u1, t1) = (self.x, self.z, self.u, self.t);
-        let (x2, z2, u2, t2) = (rhs.x, rhs.z, rhs.u, rhs.t);
+        let (x1, z1, u1, _t1) = (self.x, self.z, self.u, self.t);
+        let (x2, z2, u2, _t2) = (rhs.x, rhs.z, rhs.u, rhs.t);
 
         let t1 = x1 * x2;
         let t2 = z1 * z2;
         let t3 = u1 * u2;
-        let t4 = t1 * t2;
+        let t4 = _t1 * _t2;
         let t5 = (x1 + z1) * (x2 + z2) - t1 - t2;
-        let t6 = (u1 + t1) * (u2 + t2) - t3 - t4;
+        let t6 = (u1 + _t1) * (u2 + _t2) - t3 - t4;
         let t7 = t1 + t2.mul_small_k1(Self::B1_U32);
         let t8 = t4 * t7;
         let t9 = t3 * (t5.mul_small_k1(2 * Self::B1_U32) + t7.double());
@@ -173,15 +216,15 @@ impl Point {
     // Add a point in affine coordinates to this one.
     fn set_add_affine(&mut self, rhs: &AffinePoint) {
         // cost: 8M
-        let (x1, z1, u1, t1) = (self.x, self.z, self.u, self.t);
+        let (x1, z1, u1, _t1) = (self.x, self.z, self.u, self.t);
         let (x2, u2) = (rhs.x, rhs.u);
 
         let t1 = x1 * x2;
         let t2 = z1;
         let t3 = u1 * u2;
-        let t4 = t1;
+        let t4 = _t1;
         let t5 = x1 + x2 * z1;
-        let t6 = u1 + u2 * t1;
+        let t6 = u1 + u2 * _t1;
         let t7 = t1 + t2.mul_small_k1(Self::B1_U32);
         let t8 = t4 * t7;
         let t9 = t3 * (t5.mul_small_k1(2 * Self::B1_U32) + t7.double());
@@ -311,7 +354,7 @@ impl Point {
             0 => Vec::new(),
             1 => {
                 let p = src[0];
-                let m1 = (p.z * p.t).try_inverse().unwrap_or(GFp5::ZERO);
+                let m1 = (p.z * p.t).inverse_or_zero();
                 let res = AffinePoint {
                     x: p.x * p.t * m1,
                     u: p.u * p.z * m1,
@@ -320,7 +363,7 @@ impl Point {
                 vec![res]
             }
             n => {
-                let mut res = Vec::with_capacity(n);
+                let mut res = vec![AffinePoint::NEUTRAL; n];
                 // Compute product of all values to invert, and invert it.
                 // We also use the x and u coordinates of the points in the
                 // destination slice to keep track of the partial products.
@@ -331,10 +374,10 @@ impl Point {
                     let u = m;
                     m *= src[i].t;
 
-                    res.push(AffinePoint { x, u })
+                    res[i] = AffinePoint { x, u };
                 }
 
-                m = m.try_inverse().unwrap_or(GFp5::ZERO);
+                m = m.inverse_or_zero();
 
                 // Propagate back inverses.
                 for i in (1..n).rev() {
@@ -479,12 +522,12 @@ impl Point {
         let ss1 = c1.recode_signed_5();
 
         // Make windows for this point (Q) and for -R.
-        let winQ = self.make_window_5();
-        let winR = (-r).make_window_5();
+        let win_q = self.make_window_5();
+        let win_r = (-r).make_window_5();
 
-        let mut p = Self::lookup_vartime(&winQ, ss0[32]);
+        let mut p = Self::lookup_vartime(&win_q, ss0[32]);
         if ss1[32] != 0 {
-            p += Self::lookup_vartime(&winR, ss1[32]);
+            p += Self::lookup_vartime(&win_r, ss1[32]);
         }
         for i in (0..32).rev() {
             p.set_mdouble(5);
@@ -495,10 +538,10 @@ impl Point {
                 p += AffinePoint::lookup_vartime(&G160, tt1[i]);
             }
             if ss0[i] != 0 {
-                p += Self::lookup_vartime(&winQ, ss0[i]);
+                p += Self::lookup_vartime(&win_q, ss0[i]);
             }
             if ss1[i] != 0 {
-                p += Self::lookup_vartime(&winR, ss1[i]);
+                p += Self::lookup_vartime(&win_r, ss1[i]);
             }
         }
 
@@ -1042,5 +1085,242 @@ impl Mul<&Point> for &Scalar {
         let mut r = *other;
         r.set_mul(self);
         r
+    }
+}
+
+impl PartialEq<Point> for Point {
+    #[inline(always)]
+    fn eq(&self, other: &Point) -> bool {
+        self.equals(*other)
+    }
+}
+
+impl PartialEq<&Point> for Point {
+    #[inline(always)]
+    fn eq(&self, other: &&Point) -> bool {
+        self.equals(**other)
+    }
+}
+
+impl PartialEq<Point> for &Point {
+    #[inline(always)]
+    fn eq(&self, other: &Point) -> bool {
+        self.equals(*other)
+    }
+}
+
+impl Eq for Point {}
+
+
+#[cfg(test)]
+mod tests {
+    use plonky2_field::{extension::quintic::QuinticExtension, types::Field, goldilocks_field::GoldilocksField};
+    use rand::Rng;
+
+    use crate::curve::{GFp5, scalar_field::Scalar, base_field::InverseOrZero};
+
+    use super::{Point, AffinePoint};
+
+    #[test]
+    fn test_basic_ops() {
+        // Test vectors generated with Sage.
+        // P0 is neutral of G.
+        // P1 is a random point in G (encoded as w1)
+        // P2 = e*P1 in G (encoded as w2)
+        // P3 = P1 + P2 (in G) (encoded as w3)
+        // P4 = 2*P1 (in G) (encoded as w4)
+        // P5 = 2*P2 (in G) (encoded as w5)
+        // P6 = 2*P1 + P2 (in G) (encoded as w6)
+        // P7 = P1 + 2*P2 (in G) (encoded as w7)
+
+        let w0 = GFp5::ZERO;
+        let w1 = QuinticExtension([GoldilocksField(12539254003028696409), GoldilocksField(15524144070600887654), GoldilocksField(15092036948424041984), GoldilocksField(11398871370327264211), GoldilocksField(10958391180505708567)]);
+        let w2 = QuinticExtension([GoldilocksField(11001943240060308920), GoldilocksField(17075173755187928434), GoldilocksField(3940989555384655766), GoldilocksField(15017795574860011099), GoldilocksField(5548543797011402287)]);
+        let w3 = QuinticExtension([GoldilocksField(246872606398642312), GoldilocksField(4900963247917836450), GoldilocksField(7327006728177203977), GoldilocksField(13945036888436667069), GoldilocksField(3062018119121328861)]);
+        let w4 = QuinticExtension([GoldilocksField(8058035104653144162), GoldilocksField(16041715455419993830), GoldilocksField(7448530016070824199), GoldilocksField(11253639182222911208), GoldilocksField(6228757819849640866)]);
+        let w5 = QuinticExtension([GoldilocksField(10523134687509281194), GoldilocksField(11148711503117769087), GoldilocksField(9056499921957594891), GoldilocksField(13016664454465495026), GoldilocksField(16494247923890248266)]);
+        let w6 = QuinticExtension([GoldilocksField(12173306542237620), GoldilocksField(6587231965341539782), GoldilocksField(17027985748515888117), GoldilocksField(17194831817613584995), GoldilocksField(10056734072351459010)]);
+        let w7 = QuinticExtension([GoldilocksField(9420857400785992333), GoldilocksField(4695934009314206363), GoldilocksField(14471922162341187302), GoldilocksField(13395190104221781928), GoldilocksField(16359223219913018041)]);
+
+        // Values that should not decode successfully.
+        let bww: [GFp5; 6] = [
+            QuinticExtension([GoldilocksField(13557832913345268708), GoldilocksField(15669280705791538619), GoldilocksField(8534654657267986396), GoldilocksField(12533218303838131749), GoldilocksField(5058070698878426028)]),
+            QuinticExtension([GoldilocksField(135036726621282077), GoldilocksField(17283229938160287622), GoldilocksField(13113167081889323961), GoldilocksField(1653240450380825271), GoldilocksField(520025869628727862)]),
+            QuinticExtension([GoldilocksField(6727960962624180771), GoldilocksField(17240764188796091916), GoldilocksField(3954717247028503753), GoldilocksField(1002781561619501488), GoldilocksField(4295357288570643789)]),
+            QuinticExtension([GoldilocksField(4578929270179684956), GoldilocksField(3866930513245945042), GoldilocksField(7662265318638150701), GoldilocksField(9503686272550423634), GoldilocksField(12241691520798116285)]),
+            QuinticExtension([GoldilocksField(16890297404904119082), GoldilocksField(6169724643582733633), GoldilocksField(9725973298012340311), GoldilocksField(5977049210035183790), GoldilocksField(11379332130141664883)]),
+            QuinticExtension([GoldilocksField(13777379982711219130), GoldilocksField(14715168412651470168), GoldilocksField(17942199593791635585), GoldilocksField(6188824164976547520), GoldilocksField(15461469634034461986)]),
+        ];
+
+        assert!(Point::validate(w0));
+        assert!(Point::validate(w1));
+        assert!(Point::validate(w2));
+        assert!(Point::validate(w3));
+        assert!(Point::validate(w4));
+        assert!(Point::validate(w5));
+        assert!(Point::validate(w6));
+        assert!(Point::validate(w7));
+
+        let p0 = Point::decode(w0).expect("w0 should successfully decode");
+        let p1 = Point::decode(w1).expect("w1 should successfully decode");
+        let p2 = Point::decode(w2).expect("w2 should successfully decode");
+        let p3 = Point::decode(w3).expect("w3 should successfully decode");
+        let p4 = Point::decode(w4).expect("w4 should successfully decode");
+        let p5 = Point::decode(w5).expect("w5 should successfully decode");
+        let p6 = Point::decode(w6).expect("w6 should successfully decode");
+        let p7 = Point::decode(w7).expect("w7 should successfully decode");
+
+        assert!(p0.is_neutral()); 
+        assert!(!p1.is_neutral());
+        assert!(!p2.is_neutral());
+        assert!(!p3.is_neutral());
+        assert!(!p4.is_neutral());
+        assert!(!p5.is_neutral());
+        assert!(!p6.is_neutral());
+        assert!(!p7.is_neutral());
+
+        assert_eq!(p0, p0);
+        assert_eq!(p1, p1); 
+        assert_ne!(p0, p1);
+        assert_ne!(p1, p0);
+        assert_ne!(p1, p2);
+
+        assert_eq!(p0.encode(), w0); 
+        assert_eq!(p1.encode(), w1);
+        assert_eq!(p2.encode(), w2);
+        assert_eq!(p3.encode(), w3);
+        assert_eq!(p4.encode(), w4);
+        assert_eq!(p5.encode(), w5);
+        assert_eq!(p6.encode(), w6);
+        assert_eq!(p7.encode(), w7);
+
+        for &w in bww.iter() {
+            assert!(!Point::validate(w));
+            assert!(Point::decode(w).is_none());
+        }
+
+        assert_eq!((p1 + p2).encode(), w3);
+        assert_eq!((p1 + p1).encode(), w4);
+        assert_eq!(p2.double().encode(), w5);
+        assert_eq!((p1.double() + p2).encode(), w6);
+        assert_eq!((p1 + p2 + p2).encode(), w7);
+
+        assert_eq!((p0.double()).encode(), GFp5::ZERO);
+        assert_eq!((p0 + p0).encode(), GFp5::ZERO);
+        assert_eq!((p0 + p1).encode(), w1);
+        assert_eq!((p1 + p0).encode(), w1);
+
+        for i in 0..10 {
+            let q1 = p1.mdouble(i);
+            let mut q2 = p1;
+            for _ in 0..i {
+                q2 = q2.double();
+            }
+            assert_eq!(q1, q2);
+        }
+
+        let p2_affine = AffinePoint { x: p2.x * p2.z.inverse_or_zero(), u: p2.u * p2.t.inverse_or_zero() };
+        assert_eq!(p1 + p2_affine, p1 + p2);
+    }
+
+    #[test]
+    fn test_to_affine() {
+        let w = QuinticExtension([GoldilocksField(12539254003028696409), GoldilocksField(15524144070600887654), GoldilocksField(15092036948424041984), GoldilocksField(11398871370327264211), GoldilocksField(10958391180505708567)]);
+        let p = Point::decode(w).expect("w should successfully decode");
+
+        // Create an array of 8 points.
+        let mut tab1 = [Point::NEUTRAL; 8];
+        tab1[0] = p.double();
+        for i in 1..tab1.len() {
+            tab1[i] = tab1[0] + tab1[i - 1];
+        }
+
+        // Test conversion to affine coordinates.
+        for n in 1..(tab1.len() + 1) {
+            let tab2 = Point::batch_to_affine(&tab1);
+            for i in 0..n {
+                assert!((tab1[i].z * tab2[i].x) == (tab1[i].x));
+                assert!((tab1[i].t * tab2[i].u) == (tab1[i].u));
+            }
+        }
+
+        // Test lookup.
+        let win = Point::batch_to_affine(&tab1);
+        let p1_affine = AffinePoint::lookup(&win, 0);
+        assert!(p1_affine.x == GFp5::ZERO);
+        assert!(p1_affine.u == GFp5::ZERO);
+        for i in 1..9 {
+            let p2_affine = AffinePoint::lookup(&win, i as i32);
+            assert!((tab1[i - 1].z * p2_affine.x) == (tab1[i - 1].x));
+            assert!((tab1[i - 1].t * p2_affine.u) == (tab1[i - 1].u));
+
+            let p3_affine = AffinePoint::lookup(&win, -(i as i32));
+            assert!((tab1[i - 1].z * p3_affine.x) == (tab1[i - 1].x));
+            assert!((tab1[i - 1].t * p3_affine.u) == (-tab1[i - 1].u));
+        }
+    }
+
+    #[test]
+    fn test_scalar_mul() {
+        // w1 = encoding of a random point P1
+        // ebuf = encoding of a random scalar e
+        // w2 = encoding of P2 = e*P1
+        let w1 = QuinticExtension([GoldilocksField(7534507442095725921), GoldilocksField(16658460051907528927), GoldilocksField(12417574136563175256), GoldilocksField(2750788641759288856), GoldilocksField(620002843272906439)]);
+        let ebuf: [u8; 40] = [
+            0x1B, 0x18, 0x51, 0xC8, 0x1D, 0x22, 0xD4, 0x0D,
+            0x6D, 0x36, 0xEC, 0xCE, 0x54, 0x27, 0x41, 0x66,
+            0x08, 0x14, 0x2F, 0x8F, 0xFF, 0x64, 0xB4, 0x76,
+            0x28, 0xCD, 0x3F, 0xF8, 0xAA, 0x25, 0x16, 0xD4,
+            0xBA, 0xD0, 0xCC, 0x02, 0x1A, 0x44, 0x7C, 0x03,
+        ];
+        let w2 = QuinticExtension([GoldilocksField(9486104512504676657), GoldilocksField(14312981644741144668), GoldilocksField(5159846406177847664), GoldilocksField(15978863787033795628), GoldilocksField(3249948839313771192)]);
+
+        let p1 = Point::decode(w1).expect("w1 should successfully decode");
+        let p2 = Point::decode(w2).expect("w2 should successfully decode");
+        let (e, ce) = Scalar::try_from_noncanonical_bytes(&ebuf);
+
+        assert!(ce == 0xFFFFFFFFFFFFFFFF);
+        let q1 = p1 * e;
+        assert!(q1 == p2);
+        assert!(q1.encode() == w2);
+
+        let q2 = e * p1;
+        assert!(q2 == p2);
+        assert!(q2.encode() == w2);
+    }
+
+    #[test]
+    fn test_mulgen() {
+        let mut rng = rand::thread_rng();
+        for _ in 0..20 {
+            let mut ebuf = [0u8; 48];
+            rng.fill(&mut ebuf);
+            let e = Scalar::from_noncanonical_bytes(&ebuf);
+            let p1 = Point::GENERATOR * e;
+            let p2 = Point::mulgen(e);
+            assert!(p1 == p2);
+        }
+    }
+
+    #[test]
+    fn test_verify_muladd() {
+        let mut rng = rand::thread_rng();
+        for _ in 0..100 {
+            let mut ebuf = [0u8; 48];
+            let mut sbuf = [0u8; 48];
+            let mut kbuf = [0u8; 48];
+            rng.fill(&mut ebuf);
+            rng.fill(&mut sbuf);
+            rng.fill(&mut kbuf);
+
+            let e = Scalar::from_noncanonical_bytes(&ebuf);
+            let s = Scalar::from_noncanonical_bytes(&sbuf);
+            let k = Scalar::from_noncanonical_bytes(&kbuf);
+            let q = Point::mulgen(e);
+            let r = Point::mulgen(s) + k*q;
+            assert!(q.verify_muladd_vartime(s, k, r));
+            let r2 = r + Point::GENERATOR;
+            assert!(!q.verify_muladd_vartime(s, k, r2));
+        }
     }
 }

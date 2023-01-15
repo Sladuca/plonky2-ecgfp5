@@ -7,4 +7,6 @@ pub mod base_field;
 pub mod curve;
 pub(crate) mod mul_table;
 pub mod scalar_field;
-pub mod utils;
+
+#[cfg(test)]
+pub mod test_utils;
