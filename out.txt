@@ -1,6 +1,3 @@
-use super::curve::AffinePoint;
-use plonky2_field::{extension::quintic::QuinticExtension, goldilocks_field::GoldilocksField};
-
 pub(crate) const MUL_TABLE_G0: [AffinePoint; 16] = [
     AffinePoint { x: QuinticExtension([GoldilocksField(12883135586176881569), GoldilocksField(4356519642755055268), GoldilocksField(5248930565894896907), GoldilocksField(2165973894480315022), GoldilocksField(2448410071095648785)]), u: QuinticExtension([GoldilocksField(13835058052060938241), GoldilocksField(0), GoldilocksField(0), GoldilocksField(0), GoldilocksField(0)]) },
     AffinePoint { x: QuinticExtension([GoldilocksField(16517537419581740386), GoldilocksField(6962630169123120981), GoldilocksField(12147752690379666704), GoldilocksField(16637325971742264607), GoldilocksField(2335078582315237010)]), u: QuinticExtension([GoldilocksField(8457587110646932172), GoldilocksField(138591869800252458), GoldilocksField(3187444967472352324), GoldilocksField(18179149801168653736), GoldilocksField(9453003655195557048)]) },
@@ -145,68 +142,3 @@ pub(crate) const MUL_TABLE_G280: [AffinePoint; 16] = [
     AffinePoint { x: QuinticExtension([GoldilocksField(8819593048375407845), GoldilocksField(6714540590843281274), GoldilocksField(12089230224772664935), GoldilocksField(17126824728760033332), GoldilocksField(15606471085374753320)]), u: QuinticExtension([GoldilocksField(18421631694011443474), GoldilocksField(14887724257413490347), GoldilocksField(16780540965430713114), GoldilocksField(10821826807107857648), GoldilocksField(6670989693469822701)]) },
     AffinePoint { x: QuinticExtension([GoldilocksField(3738402919300376943), GoldilocksField(3839435231606872366), GoldilocksField(9950700849677152681), GoldilocksField(13599115104880397736), GoldilocksField(8170114904882828684)]), u: QuinticExtension([GoldilocksField(17403178918799426162), GoldilocksField(12276995036775716338), GoldilocksField(135085417294263740), GoldilocksField(6813815177605214808), GoldilocksField(15873392253765702165)]) },
 ];
-
-// TODO: separate this into a proper script
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::curve::{curve::Point, scalar_field::Scalar};
-    use num::{BigUint, FromPrimitive};
-    use plonky2_field::types::{Field, PrimeField64};
-
-    // For k = 40*j (j = 0 to 7), constant Gk[] is an array of 16 points in
-    // affine coordinates, with Gk[i] = (i+1)*(2^k)*G for the conventional
-    // generator point G.
-
-    fn compute_table(j: u64) -> [AffinePoint; 16] {
-		let k = 40 * j;
-        let mut table = [Point::NEUTRAL; 16];
-
-        for i in 0..16 {
-            let s_biguint =
-                (BigUint::from_u64(1).unwrap() << k) * BigUint::from_usize(i + 1).unwrap();
-            let s = Scalar::from_noncanonical_biguint(s_biguint);
-            table[i] = Point::GENERATOR * s;
-        }
-
-        let mut res = [AffinePoint::NEUTRAL; 16];
-        res.copy_from_slice(&Point::batch_to_affine(&table));
-
-        res
-    }
-
-    fn print_table(table: &[AffinePoint; 16], name: &str) {
-        println!("pub(crate) const {}: [AffinePoint; 16] = [", name);
-
-        for i in 0..table.len() {
-            let x_limbs = table[i]
-                .x
-                .0
-                .map(|x| format!("GoldilocksField({})", x.to_canonical_u64()))
-                .join(", ");
-            let u_limbs = table[i]
-                .u
-                .0
-                .map(|u| format!("GoldilocksField({})", u.to_canonical_u64()))
-                .join(", ");
-
-            println!(
-                "    AffinePoint {{ x: QuinticExtension([{}]), u: QuinticExtension([{}]) }},",
-                x_limbs, u_limbs
-            );
-        }
-
-        println!("];");
-    }
-
-    #[ignore]
-    #[test]
-    fn print_mul_table() {
-        for j in 0..8 {
-            let table = compute_table(j);
-            print_table(&table, &format!("MUL_TABLE_G{}", j * 40));
-        }
-
-        panic!();
-    }
-}

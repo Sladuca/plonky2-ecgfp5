@@ -10,10 +10,9 @@ use plonky2_field::goldilocks_field::GoldilocksField;
 use plonky2_field::ops::Square;
 use plonky2_field::types::Field;
 
-use crate::curve::base_field::{Half, Legendre, MulSmall, SquareRoot};
+use crate::curve::base_field::{Half, Legendre, SquareRoot};
 use crate::curve::mul_table::*;
 use crate::curve::scalar_field::Scalar;
-
 use crate::curve::{GFp, GFp5};
 
 use super::base_field::InverseOrZero;
@@ -38,7 +37,6 @@ pub(crate) struct AffinePoint {
     pub(crate) u: GFp5,
 }
 
-
 /// A curve point in short Weirstrass form (x, y). This is used by the in-circuit representation
 #[derive(Clone, Copy, Debug)]
 pub struct ShortWeierstrassPoint {
@@ -50,35 +48,55 @@ pub struct ShortWeierstrassPoint {
 impl Point {
     // Curve equation 'a' constant.
     const A: GFp5 = QuinticExtension([GFp::TWO, GFp::ZERO, GFp::ZERO, GFp::ZERO, GFp::ZERO]);
+    const B1: u64 = 263;
 
-    // curve equation `A` constants when in short Weierstrass form
-    pub(crate) const A_WEIRSTRASS: GFp5 = QuinticExtension([GoldilocksField(6148914689804861439), GoldilocksField(263), GFp::ZERO, GFp::ZERO, GFp::ZERO]);
+    const B: GFp5 = QuinticExtension([GFp::ZERO, GoldilocksField(Self::B1), GFp::ZERO, GFp::ZERO, GFp::ZERO]);
 
-    // Curve equation 'b' constant is equal to B1*z as a u32
-    const B1_U32: u32 = 263;
-
-    // curve equation `B` constant in short Weierstrass form
-    pub(crate) const B_WEIRSTRASS: GFp5 = QuinticExtension([GoldilocksField(15713893096167979237), GoldilocksField(6148914689804861265), GFp::ZERO, GFp::ZERO, GFp::ZERO]);
-
-    /* unused
-    // Curve equation 'b' constant.
-    const B: GFp5 = GFp5([
+    // 2*b
+    const B_MUL2: GFp5 = QuinticExtension([
         GFp::ZERO,
-        GFp::from_u64_reduce(Self::B1 as u64),
+        GoldilocksField(2 * Self::B1),
         GFp::ZERO,
         GFp::ZERO,
         GFp::ZERO,
     ]);
-    */
-
     // 4*b
     const B_MUL4: GFp5 = QuinticExtension([
         GFp::ZERO,
-        GoldilocksField(4 * Self::B1_U32 as u64),
+        GoldilocksField(4 * Self::B1),
         GFp::ZERO,
         GFp::ZERO,
         GFp::ZERO,
     ]);
+    // 16*b
+    const B_MUL16: GFp5 = QuinticExtension([
+        GFp::ZERO,
+        GoldilocksField(16 * Self::B1),
+        GFp::ZERO,
+        GFp::ZERO,
+        GFp::ZERO,
+    ]);
+
+    // curve equation `A` constants when in short Weierstrass form
+    pub(crate) const A_WEIRSTRASS: GFp5 = QuinticExtension([
+        GoldilocksField(6148914689804861439),
+        GoldilocksField(263),
+        GFp::ZERO,
+        GFp::ZERO,
+        GFp::ZERO,
+    ]);
+
+
+    // curve equation `B` constant in short Weierstrass form
+    pub(crate) const B_WEIRSTRASS: GFp5 = QuinticExtension([
+        GoldilocksField(15713893096167979237),
+        GoldilocksField(6148914689804861265),
+        GFp::ZERO,
+        GFp::ZERO,
+        GFp::ZERO,
+    ]);
+
+
 
     /// The neutral point (neutral of the group law).
     pub const NEUTRAL: Self = Self {
@@ -178,7 +196,11 @@ impl Point {
         let x2 = (e - r).half();
         let x = if x1.legendre() == GFp::ONE { x1 } else { x2 };
 
-        let x = if c { x + Self::A / GFp5::from_canonical_u16(3) } else { GFp5::ZERO };
+        let x = if c {
+            x + Self::A / GFp5::from_canonical_u16(3)
+        } else {
+            GFp5::ZERO
+        };
         let y = -w * x;
         let is_inf = !c;
 
@@ -190,7 +212,7 @@ impl Point {
         }
     }
 
-    // General point addition. GFpormulas are complete (no special case).
+    // General point addition. formulas are complete (no special case).
     fn set_add(&mut self, rhs: &Self) {
         // cost: 10M
         let (x1, z1, u1, _t1) = (self.x, self.z, self.u, self.t);
@@ -202,14 +224,14 @@ impl Point {
         let t4 = _t1 * _t2;
         let t5 = (x1 + z1) * (x2 + z2) - t1 - t2;
         let t6 = (u1 + _t1) * (u2 + _t2) - t3 - t4;
-        let t7 = t1 + t2.mul_small_k1(Self::B1_U32);
+        let t7 = t1 + t2 * Self::B;
         let t8 = t4 * t7;
-        let t9 = t3 * (t5.mul_small_k1(2 * Self::B1_U32) + t7.double());
+        let t9 = t3 * (t5 * Self::B_MUL2 + t7.double());
         let t10 = (t4 + t3.double()) * (t5 + t7);
 
-        self.x = (t10 - t8).mul_small_k1(Self::B1_U32);
+        self.x = (t10 - t8) * Self::B;
         self.z = t8 - t9;
-        self.u = t6 * (t2.mul_small_k1(Self::B1_U32) - t1);
+        self.u = t6 * ((t2 * Self::B) - t1);
         self.t = t8 + t9;
     }
 
@@ -225,13 +247,13 @@ impl Point {
         let t4 = _t1;
         let t5 = x1 + x2 * z1;
         let t6 = u1 + u2 * _t1;
-        let t7 = t1 + t2.mul_small_k1(Self::B1_U32);
+        let t7 = t1 + t2 * Self::B;
         let t8 = t4 * t7;
-        let t9 = t3 * (t5.mul_small_k1(2 * Self::B1_U32) + t7.double());
+        let t9 = t3 * (t5 * Self::B_MUL2 + t7.double());
         let t10 = (t4 + t3.double()) * (t5 + t7);
 
-        self.x = (t10 - t8).mul_small_k1(Self::B1_U32);
-        self.u = t6 * (t2.mul_small_k1(Self::B1_U32) - t1);
+        self.x = (t10 - t8) * Self::B;
+        self.u = t6 * (t2 * Self::B - t1);
         self.z = t8 - t9;
         self.t = t8 + t9;
     }
@@ -272,7 +294,7 @@ impl Point {
         let w1 = t2 - (x + z).double() * t3;
         let t4 = z1.square();
 
-        self.x = t4.mul_small_k1(4 * Self::B1_U32);
+        self.x = t4 * Self::B_MUL4;
         self.z = w1.square();
         self.u = (w1 + z1).square() - t4 - self.z;
         self.t = x1.double() - t4 * GFp5::from_canonical_u64(4) - self.z;
@@ -306,8 +328,8 @@ impl Point {
         let mut w1 = t2 - (x0 + z0).double() * t3;
         let mut t4 = w1.square();
         let mut t5 = z1.square();
-        let mut x = t5.square().mul_small_k1(16 * Self::B1_U32);
-        let mut w = x1.double() - t5.mul_small(4) - t4;
+        let mut x = t5.square( ) * Self::B_MUL16;
+        let mut w = x1.double() - t5 * GFp5::from_canonical_u16(4) - t4;
         let mut z = (w1 + z1).square() - t4 - t5;
 
         for _ in 2..n {
@@ -317,15 +339,15 @@ impl Point {
             t4 = t3.square();
             t5 = (w + z).square() - t1 - t3;
             z = t5 * ((x + t1).double() - t3);
-            x = (t2 * t4).mul_small_k1(16 * Self::B1_U32);
-            w = -t4 - t2.mul_small_kn01(4, 4 * Self::B1_U32);
+            x = (t2 * t4) * Self::B_MUL16;
+            w = -t4 - t2 * (Self::B_MUL4 - GFp5::from_canonical_u16(4));
         }
 
         t1 = w.square();
         t2 = z.square();
         t3 = (w + z).square() - t1 - t2;
         w1 = t1 - (x + t2).double();
-        self.x = t3.square().mul_small_k1(Self::B1_U32);
+        self.x = t3.square() * Self::B;
         self.z = w1.square();
         self.u = t3 * w1;
         self.t = t1.double() * (t1 - t2.double()) - self.z;
@@ -343,7 +365,7 @@ impl Point {
     }
 
     // Convert points to affine coordinates.
-    fn batch_to_affine(src: &[Self]) -> Vec<AffinePoint> {
+    pub(crate) fn batch_to_affine(src: &[Self]) -> Vec<AffinePoint> {
         // We use a trick due to Montgomery: to compute the inverse of
         // x and of y, a single inversion suffices, with:
         //    1/x = y*(1/(x*y))
@@ -423,7 +445,7 @@ impl Point {
         let mut digits = [0; (319 + Self::WINDOW) / Self::WINDOW];
         s.recode_signed(&mut digits, Self::WINDOW as i32);
 
-        *self = AffinePoint::lookup(&win, digits[digits.len() - 1]).to_point();
+        *self = AffinePoint::lookup_vartime(&win, digits[digits.len() - 1]).to_point();
 
         for &digit in digits.iter().rev() {
             self.set_mdouble(Self::WINDOW as u32);
@@ -437,27 +459,26 @@ impl Point {
     pub fn mulgen(s: Scalar) -> Self {
         // Precomputed tables are for j*(2^(80*i))*G, for i = 0 to 3
         // and j = 1 to 16, i.e. 5-bit windows.
-        let mut digits = [0; 64];
+        let mut digits = [0i32; 64];
         s.recode_signed(&mut digits, 5);
-
-        let mut p = AffinePoint::lookup(&G0, digits[7]).to_point();
-        p += AffinePoint::lookup(&G40, digits[15]);
-        p += AffinePoint::lookup(&G80, digits[23]);
-        p += AffinePoint::lookup(&G120, digits[31]);
-        p += AffinePoint::lookup(&G160, digits[39]);
-        p += AffinePoint::lookup(&G200, digits[47]);
-        p += AffinePoint::lookup(&G240, digits[55]);
-        p += AffinePoint::lookup(&G280, digits[63]);
+        let mut p = AffinePoint::lookup(&MUL_TABLE_G0, digits[7]).to_point();
+        p += AffinePoint::lookup(&MUL_TABLE_G40, digits[15]);
+        p += AffinePoint::lookup(&MUL_TABLE_G80, digits[23]);
+        p += AffinePoint::lookup(&MUL_TABLE_G120, digits[31]);
+        p += AffinePoint::lookup(&MUL_TABLE_G160, digits[39]);
+        p += AffinePoint::lookup(&MUL_TABLE_G200, digits[47]);
+        p += AffinePoint::lookup(&MUL_TABLE_G240, digits[55]);
+        p += AffinePoint::lookup(&MUL_TABLE_G280, digits[63]);
         for i in (0..7).rev() {
             p.set_mdouble(5);
-            p += AffinePoint::lookup(&G0, digits[i]);
-            p += AffinePoint::lookup(&G40, digits[i + 8]);
-            p += AffinePoint::lookup(&G80, digits[i + 16]);
-            p += AffinePoint::lookup(&G120, digits[i + 24]);
-            p += AffinePoint::lookup(&G160, digits[i + 32]);
-            p += AffinePoint::lookup(&G200, digits[i + 40]);
-            p += AffinePoint::lookup(&G240, digits[i + 48]);
-            p += AffinePoint::lookup(&G280, digits[i + 56]);
+            p += AffinePoint::lookup(&MUL_TABLE_G0, digits[i]);
+            p += AffinePoint::lookup(&MUL_TABLE_G40, digits[i + 8]);
+            p += AffinePoint::lookup(&MUL_TABLE_G80, digits[i + 16]);
+            p += AffinePoint::lookup(&MUL_TABLE_G120, digits[i + 24]);
+            p += AffinePoint::lookup(&MUL_TABLE_G160, digits[i + 32]);
+            p += AffinePoint::lookup(&MUL_TABLE_G200, digits[i + 40]);
+            p += AffinePoint::lookup(&MUL_TABLE_G240, digits[i + 48]);
+            p += AffinePoint::lookup(&MUL_TABLE_G280, digits[i + 56]);
         }
         p
     }
@@ -490,7 +511,7 @@ impl Point {
     /// This is the main operation in Schnorr signature verification.
     /// WARNING: this function is not constant-time; use only on
     /// public data.
-    pub fn verify_muladd_vartime(self, s: Scalar, k: Scalar, r: Self) -> bool {
+    pub fn verify_muladd_vartime(self, s: Scalar, k: Scalar, r :Self) -> bool {
         // We use a method by Antipa et al (SAC 2005), following the
         // description in: https://eprint.iacr.org/2020/454
         // We split k into two (signed) integers c0 and c1 such
@@ -532,10 +553,10 @@ impl Point {
         for i in (0..32).rev() {
             p.set_mdouble(5);
             if tt0[i] != 0 {
-                p += AffinePoint::lookup_vartime(&G0, tt0[i]);
+                p += AffinePoint::lookup_vartime(&MUL_TABLE_G0, tt0[i]);
             }
             if tt1[i] != 0 {
-                p += AffinePoint::lookup_vartime(&G160, tt1[i]);
+                p += AffinePoint::lookup_vartime(&MUL_TABLE_G160, tt1[i]);
             }
             if ss0[i] != 0 {
                 p += Self::lookup_vartime(&win_q, ss0[i]);
@@ -545,12 +566,12 @@ impl Point {
             }
         }
 
-        !p.is_neutral()
+        p == Self::NEUTRAL
     }
 }
 
 impl AffinePoint {
-    const NEUTRAL: Self = Self {
+    pub(crate) const NEUTRAL: Self = Self {
         x: GFp5::ZERO,
         u: GFp5::ZERO,
     };
@@ -593,11 +614,10 @@ impl AffinePoint {
         // If k < 0, then we must negate the point.
         let c = (sign as u64) | ((sign as u64) << 32);
         self.x = x;
+        self.u = u;
 
         if c != 0 {
-            self.u = -u
-        } else {
-            self.u = u
+            self.set_neg();
         }
     }
 
@@ -1113,15 +1133,16 @@ impl PartialEq<Point> for &Point {
 
 impl Eq for Point {}
 
-
 #[cfg(test)]
 mod tests {
-    use plonky2_field::{extension::quintic::QuinticExtension, types::Field, goldilocks_field::GoldilocksField};
-    use rand::Rng;
+    use plonky2_field::{
+        extension::quintic::QuinticExtension, goldilocks_field::GoldilocksField, types::Field,
+    };
+    use rand::{thread_rng, Rng};
 
-    use crate::curve::{GFp5, scalar_field::Scalar, base_field::InverseOrZero};
+    use crate::curve::{base_field::InverseOrZero, scalar_field::Scalar, GFp5};
 
-    use super::{Point, AffinePoint};
+    use super::{AffinePoint, Point};
 
     #[test]
     fn test_basic_ops() {
@@ -1136,22 +1157,100 @@ mod tests {
         // P7 = P1 + 2*P2 (in G) (encoded as w7)
 
         let w0 = GFp5::ZERO;
-        let w1 = QuinticExtension([GoldilocksField(12539254003028696409), GoldilocksField(15524144070600887654), GoldilocksField(15092036948424041984), GoldilocksField(11398871370327264211), GoldilocksField(10958391180505708567)]);
-        let w2 = QuinticExtension([GoldilocksField(11001943240060308920), GoldilocksField(17075173755187928434), GoldilocksField(3940989555384655766), GoldilocksField(15017795574860011099), GoldilocksField(5548543797011402287)]);
-        let w3 = QuinticExtension([GoldilocksField(246872606398642312), GoldilocksField(4900963247917836450), GoldilocksField(7327006728177203977), GoldilocksField(13945036888436667069), GoldilocksField(3062018119121328861)]);
-        let w4 = QuinticExtension([GoldilocksField(8058035104653144162), GoldilocksField(16041715455419993830), GoldilocksField(7448530016070824199), GoldilocksField(11253639182222911208), GoldilocksField(6228757819849640866)]);
-        let w5 = QuinticExtension([GoldilocksField(10523134687509281194), GoldilocksField(11148711503117769087), GoldilocksField(9056499921957594891), GoldilocksField(13016664454465495026), GoldilocksField(16494247923890248266)]);
-        let w6 = QuinticExtension([GoldilocksField(12173306542237620), GoldilocksField(6587231965341539782), GoldilocksField(17027985748515888117), GoldilocksField(17194831817613584995), GoldilocksField(10056734072351459010)]);
-        let w7 = QuinticExtension([GoldilocksField(9420857400785992333), GoldilocksField(4695934009314206363), GoldilocksField(14471922162341187302), GoldilocksField(13395190104221781928), GoldilocksField(16359223219913018041)]);
+        let w1 = QuinticExtension([
+            GoldilocksField(12539254003028696409),
+            GoldilocksField(15524144070600887654),
+            GoldilocksField(15092036948424041984),
+            GoldilocksField(11398871370327264211),
+            GoldilocksField(10958391180505708567),
+        ]);
+        let w2 = QuinticExtension([
+            GoldilocksField(11001943240060308920),
+            GoldilocksField(17075173755187928434),
+            GoldilocksField(3940989555384655766),
+            GoldilocksField(15017795574860011099),
+            GoldilocksField(5548543797011402287),
+        ]);
+        let w3 = QuinticExtension([
+            GoldilocksField(246872606398642312),
+            GoldilocksField(4900963247917836450),
+            GoldilocksField(7327006728177203977),
+            GoldilocksField(13945036888436667069),
+            GoldilocksField(3062018119121328861),
+        ]);
+        let w4 = QuinticExtension([
+            GoldilocksField(8058035104653144162),
+            GoldilocksField(16041715455419993830),
+            GoldilocksField(7448530016070824199),
+            GoldilocksField(11253639182222911208),
+            GoldilocksField(6228757819849640866),
+        ]);
+        let w5 = QuinticExtension([
+            GoldilocksField(10523134687509281194),
+            GoldilocksField(11148711503117769087),
+            GoldilocksField(9056499921957594891),
+            GoldilocksField(13016664454465495026),
+            GoldilocksField(16494247923890248266),
+        ]);
+        let w6 = QuinticExtension([
+            GoldilocksField(12173306542237620),
+            GoldilocksField(6587231965341539782),
+            GoldilocksField(17027985748515888117),
+            GoldilocksField(17194831817613584995),
+            GoldilocksField(10056734072351459010),
+        ]);
+        let w7 = QuinticExtension([
+            GoldilocksField(9420857400785992333),
+            GoldilocksField(4695934009314206363),
+            GoldilocksField(14471922162341187302),
+            GoldilocksField(13395190104221781928),
+            GoldilocksField(16359223219913018041),
+        ]);
 
         // Values that should not decode successfully.
         let bww: [GFp5; 6] = [
-            QuinticExtension([GoldilocksField(13557832913345268708), GoldilocksField(15669280705791538619), GoldilocksField(8534654657267986396), GoldilocksField(12533218303838131749), GoldilocksField(5058070698878426028)]),
-            QuinticExtension([GoldilocksField(135036726621282077), GoldilocksField(17283229938160287622), GoldilocksField(13113167081889323961), GoldilocksField(1653240450380825271), GoldilocksField(520025869628727862)]),
-            QuinticExtension([GoldilocksField(6727960962624180771), GoldilocksField(17240764188796091916), GoldilocksField(3954717247028503753), GoldilocksField(1002781561619501488), GoldilocksField(4295357288570643789)]),
-            QuinticExtension([GoldilocksField(4578929270179684956), GoldilocksField(3866930513245945042), GoldilocksField(7662265318638150701), GoldilocksField(9503686272550423634), GoldilocksField(12241691520798116285)]),
-            QuinticExtension([GoldilocksField(16890297404904119082), GoldilocksField(6169724643582733633), GoldilocksField(9725973298012340311), GoldilocksField(5977049210035183790), GoldilocksField(11379332130141664883)]),
-            QuinticExtension([GoldilocksField(13777379982711219130), GoldilocksField(14715168412651470168), GoldilocksField(17942199593791635585), GoldilocksField(6188824164976547520), GoldilocksField(15461469634034461986)]),
+            QuinticExtension([
+                GoldilocksField(13557832913345268708),
+                GoldilocksField(15669280705791538619),
+                GoldilocksField(8534654657267986396),
+                GoldilocksField(12533218303838131749),
+                GoldilocksField(5058070698878426028),
+            ]),
+            QuinticExtension([
+                GoldilocksField(135036726621282077),
+                GoldilocksField(17283229938160287622),
+                GoldilocksField(13113167081889323961),
+                GoldilocksField(1653240450380825271),
+                GoldilocksField(520025869628727862),
+            ]),
+            QuinticExtension([
+                GoldilocksField(6727960962624180771),
+                GoldilocksField(17240764188796091916),
+                GoldilocksField(3954717247028503753),
+                GoldilocksField(1002781561619501488),
+                GoldilocksField(4295357288570643789),
+            ]),
+            QuinticExtension([
+                GoldilocksField(4578929270179684956),
+                GoldilocksField(3866930513245945042),
+                GoldilocksField(7662265318638150701),
+                GoldilocksField(9503686272550423634),
+                GoldilocksField(12241691520798116285),
+            ]),
+            QuinticExtension([
+                GoldilocksField(16890297404904119082),
+                GoldilocksField(6169724643582733633),
+                GoldilocksField(9725973298012340311),
+                GoldilocksField(5977049210035183790),
+                GoldilocksField(11379332130141664883),
+            ]),
+            QuinticExtension([
+                GoldilocksField(13777379982711219130),
+                GoldilocksField(14715168412651470168),
+                GoldilocksField(17942199593791635585),
+                GoldilocksField(6188824164976547520),
+                GoldilocksField(15461469634034461986),
+            ]),
         ];
 
         assert!(Point::validate(w0));
@@ -1172,7 +1271,7 @@ mod tests {
         let p6 = Point::decode(w6).expect("w6 should successfully decode");
         let p7 = Point::decode(w7).expect("w7 should successfully decode");
 
-        assert!(p0.is_neutral()); 
+        assert!(p0.is_neutral());
         assert!(!p1.is_neutral());
         assert!(!p2.is_neutral());
         assert!(!p3.is_neutral());
@@ -1182,12 +1281,12 @@ mod tests {
         assert!(!p7.is_neutral());
 
         assert_eq!(p0, p0);
-        assert_eq!(p1, p1); 
+        assert_eq!(p1, p1);
         assert_ne!(p0, p1);
         assert_ne!(p1, p0);
         assert_ne!(p1, p2);
 
-        assert_eq!(p0.encode(), w0); 
+        assert_eq!(p0.encode(), w0);
         assert_eq!(p1.encode(), w1);
         assert_eq!(p2.encode(), w2);
         assert_eq!(p3.encode(), w3);
@@ -1221,13 +1320,22 @@ mod tests {
             assert_eq!(q1, q2);
         }
 
-        let p2_affine = AffinePoint { x: p2.x * p2.z.inverse_or_zero(), u: p2.u * p2.t.inverse_or_zero() };
+        let p2_affine = AffinePoint {
+            x: p2.x * p2.z.inverse_or_zero(),
+            u: p2.u * p2.t.inverse_or_zero(),
+        };
         assert_eq!(p1 + p2_affine, p1 + p2);
     }
 
     #[test]
     fn test_to_affine() {
-        let w = QuinticExtension([GoldilocksField(12539254003028696409), GoldilocksField(15524144070600887654), GoldilocksField(15092036948424041984), GoldilocksField(11398871370327264211), GoldilocksField(10958391180505708567)]);
+        let w = QuinticExtension([
+            GoldilocksField(12539254003028696409),
+            GoldilocksField(15524144070600887654),
+            GoldilocksField(15092036948424041984),
+            GoldilocksField(11398871370327264211),
+            GoldilocksField(10958391180505708567),
+        ]);
         let p = Point::decode(w).expect("w should successfully decode");
 
         // Create an array of 8 points.
@@ -1267,15 +1375,25 @@ mod tests {
         // w1 = encoding of a random point P1
         // ebuf = encoding of a random scalar e
         // w2 = encoding of P2 = e*P1
-        let w1 = QuinticExtension([GoldilocksField(7534507442095725921), GoldilocksField(16658460051907528927), GoldilocksField(12417574136563175256), GoldilocksField(2750788641759288856), GoldilocksField(620002843272906439)]);
+        let w1 = QuinticExtension([
+            GoldilocksField(7534507442095725921),
+            GoldilocksField(16658460051907528927),
+            GoldilocksField(12417574136563175256),
+            GoldilocksField(2750788641759288856),
+            GoldilocksField(620002843272906439),
+        ]);
         let ebuf: [u8; 40] = [
-            0x1B, 0x18, 0x51, 0xC8, 0x1D, 0x22, 0xD4, 0x0D,
-            0x6D, 0x36, 0xEC, 0xCE, 0x54, 0x27, 0x41, 0x66,
-            0x08, 0x14, 0x2F, 0x8F, 0xFF, 0x64, 0xB4, 0x76,
-            0x28, 0xCD, 0x3F, 0xF8, 0xAA, 0x25, 0x16, 0xD4,
-            0xBA, 0xD0, 0xCC, 0x02, 0x1A, 0x44, 0x7C, 0x03,
+            0x1B, 0x18, 0x51, 0xC8, 0x1D, 0x22, 0xD4, 0x0D, 0x6D, 0x36, 0xEC, 0xCE, 0x54, 0x27,
+            0x41, 0x66, 0x08, 0x14, 0x2F, 0x8F, 0xFF, 0x64, 0xB4, 0x76, 0x28, 0xCD, 0x3F, 0xF8,
+            0xAA, 0x25, 0x16, 0xD4, 0xBA, 0xD0, 0xCC, 0x02, 0x1A, 0x44, 0x7C, 0x03,
         ];
-        let w2 = QuinticExtension([GoldilocksField(9486104512504676657), GoldilocksField(14312981644741144668), GoldilocksField(5159846406177847664), GoldilocksField(15978863787033795628), GoldilocksField(3249948839313771192)]);
+        let w2 = QuinticExtension([
+            GoldilocksField(9486104512504676657),
+            GoldilocksField(14312981644741144668),
+            GoldilocksField(5159846406177847664),
+            GoldilocksField(15978863787033795628),
+            GoldilocksField(3249948839313771192),
+        ]);
 
         let p1 = Point::decode(w1).expect("w1 should successfully decode");
         let p2 = Point::decode(w2).expect("w2 should successfully decode");
@@ -1292,21 +1410,32 @@ mod tests {
     }
 
     #[test]
-    fn test_mulgen() {
-        let mut rng = rand::thread_rng();
+    fn decode_generator() {
+        let g = Point::decode(GFp5::from_canonical_u16(4)).expect("4 should successfully decode");
+        assert_eq!(g, Point::GENERATOR);
+
+        assert_eq!(Point::encode(Point::GENERATOR), GFp5::from_canonical_u16(4));
+        assert_eq!(Point::encode(g), GFp5::from_canonical_u16(4));
+    }
+
+    #[test]
+    fn ecgfp5_mulgen() {
+        let mut rng = thread_rng();
         for _ in 0..20 {
             let mut ebuf = [0u8; 48];
             rng.fill(&mut ebuf);
+
             let e = Scalar::from_noncanonical_bytes(&ebuf);
             let p1 = Point::GENERATOR * e;
             let p2 = Point::mulgen(e);
-            assert!(p1 == p2);
+            
+            assert_eq!(p1, p2);
         }
     }
 
     #[test]
-    fn test_verify_muladd() {
-        let mut rng = rand::thread_rng();
+    fn ecgfp5_verify_muladd() {
+        let mut rng = thread_rng();
         for _ in 0..100 {
             let mut ebuf = [0u8; 48];
             let mut sbuf = [0u8; 48];
@@ -1318,9 +1447,11 @@ mod tests {
             let e = Scalar::from_noncanonical_bytes(&ebuf);
             let s = Scalar::from_noncanonical_bytes(&sbuf);
             let k = Scalar::from_noncanonical_bytes(&kbuf);
+
             let q = Point::mulgen(e);
             let r = Point::mulgen(s) + k*q;
             assert!(q.verify_muladd_vartime(s, k, r));
+
             let r2 = r + Point::GENERATOR;
             assert!(!q.verify_muladd_vartime(s, k, r2));
         }

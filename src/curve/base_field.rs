@@ -58,10 +58,9 @@ impl InverseOrZero for GFp {
 
 impl InverseOrZero for GFp5 {
     fn inverse_or_zero(&self) -> Self {
-        self.try_inverse().unwrap_or(QuinticExtension::ZERO)
+        self.try_inverse().unwrap_or(GFp5::ZERO)
     }
 }
-
 
 pub trait Half {
     fn half(&self) -> Self;
@@ -87,53 +86,6 @@ pub trait Sgn0 {
 impl Sgn0 for QuinticExtension<GFp> {
     fn sgn0(&self) -> bool {
         quintic_ext_sgn0(*self)
-    }
-}
-
-pub(crate) trait MulSmall {
-    // multiply by a small integer (less than 2^31).
-    fn mul_small(&self, rhs: u32) -> Self;
-
-    // multiply by a extension field element of the form xz, where `x` is less than `2^29`
-    fn mul_small_k1(&self, rhs: u32) -> Self;
-
-    // For two small integers v0 and v1 (both lower than 2^28),
-    // multiply this value by a extension field element of the form `z*v1 - v0`.
-    fn mul_small_kn01(&self, v0: u32, v1: u32) -> Self;
-}
-
-impl MulSmall for QuinticExtension<GFp> {
-    fn mul_small(&self, rhs: u32) -> Self {
-        let rhs = GFp::from_canonical_u32(rhs);
-        let QuinticExtension([a0, a1, a2, a3, a4]) = *self;
-        QuinticExtension([a0 * rhs, a1 * rhs, a2 * rhs, a3 * rhs, a4 * rhs])
-    }
-
-    fn mul_small_k1(&self, rhs: u32) -> Self {
-        let rhs = GFp::from_canonical_u32(rhs);
-        let QuinticExtension([a0, a1, a2, a3, a4]) = *self;
-
-        let d0 = a4 * rhs * GFp::from_canonical_u32(3);
-        let d1 = a0 * rhs;
-        let d2 = a1 * rhs;
-        let d3 = a2 * rhs;
-        let d4 = a3 * rhs;
-
-        QuinticExtension([d0, d1, d2, d3, d4])
-    }
-
-    fn mul_small_kn01(&self, v0: u32, v1: u32) -> Self {
-        let v0 = GFp::from_canonical_u32(v0);
-        let v1 = GFp::from_canonical_u32(v1);
-        let QuinticExtension([a0, a1, a2, a3, a4]) = *self;
-
-        let d0 = a4 * v1 * GFp::from_canonical_u32(3) - a0 * v0;
-        let d1 = a0 * v1 - a1 * v0;
-        let d2 = a1 * v1 - a2 * v0;
-        let d3 = a2 * v1 - a3 * v0;
-        let d4 = a3 * v1 - a4 * v0;
-
-        QuinticExtension([d0, d1, d2, d3, d4])
     }
 }
 
@@ -180,13 +132,12 @@ pub(crate) fn sqrt_quintic_ext_goldilocks(x: GFp5) -> Option<GFp5> {
     let [f0, f1, f2, f3, f4] = f.0;
     let g = x0 * f0 + GFp::from_canonical_u64(3) * (x1 * f4 + x2 * f3 + x3 * f2 + x4 * f1);
 
-    g.sqrt()
-        .map(|s| e.inverse_or_zero() * s.into())
+    g.sqrt().map(|s| e.inverse_or_zero() * s.into())
 }
 
 #[cfg(test)]
 mod tests {
-    use plonky2::plonk::config::{PoseidonGoldilocksConfig, GenericConfig};
+    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
     use plonky2_field::types::Sample;
     use rand::thread_rng;
 

@@ -1,6 +1,9 @@
+use super::{
+    base_field::{Sgn0, SquareRoot},
+    GFp, GFp5,
+};
 use plonky2_field::{extension::quintic::QuinticExtension, types::Sample};
 use rand::thread_rng;
-use super::{GFp5, GFp, base_field::{SquareRoot, Sgn0}};
 
 pub fn gfp5_random_non_square() -> GFp5 {
     let mut rng = thread_rng();

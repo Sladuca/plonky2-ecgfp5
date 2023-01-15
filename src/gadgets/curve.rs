@@ -1,5 +1,5 @@
 use crate::curve::scalar_field::Scalar;
-use crate::curve::{GFp, GFp5, curve::Point};
+use crate::curve::{curve::Point, GFp, GFp5};
 use crate::gadgets::base_field::{CircuitBuilderGFp5, QuinticExtensionTarget};
 use num::{BigUint, FromPrimitive, Zero};
 use plonky2::field::extension::FieldExtension;
@@ -140,7 +140,8 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 let mut lambda_0_if_sx_0 = self.sub_quintic_ext(y2, y1);
                 let lambda_0_if_sx_1 = self.square_quintic_ext(x1);
                 lambda_0_if_sx_0 = self.mul_const_quintic_ext(three, lambda_0_if_sx_0);
-                lambda_0_if_sx_0 = self.add_const_quintic_ext(lambda_0_if_sx_0, Point::A_WEIRSTRASS);
+                lambda_0_if_sx_0 =
+                    self.add_const_quintic_ext(lambda_0_if_sx_0, Point::A_WEIRSTRASS);
 
                 let lambda_1_if_sx_0 = self.add_quintic_ext(y1, y1);
                 let lambda_1_if_sx_1 = self.sub_quintic_ext(x2, x1);

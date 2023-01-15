@@ -192,6 +192,7 @@ impl Field for Scalar {
     }
 
     fn from_noncanonical_biguint(val: BigUint) -> Self {
+        let val = val % Self::order();
         Self(
             val.to_u64_digits()
                 .into_iter()
@@ -953,8 +954,8 @@ impl Signed640 {
 
 #[cfg(test)]
 mod tests {
-    use rand::{thread_rng, Rng};
     use super::Scalar;
+    use rand::{thread_rng, Rng};
 
     #[test]
     fn test_scalar_ops() {

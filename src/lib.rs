@@ -1,7 +1,7 @@
 extern crate alloc;
 
-pub mod gadgets;
 pub mod curve;
+pub mod gadgets;
 
 #[cfg(test)]
 mod macros;
