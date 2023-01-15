@@ -50,7 +50,13 @@ impl Point {
     const A: GFp5 = QuinticExtension([GFp::TWO, GFp::ZERO, GFp::ZERO, GFp::ZERO, GFp::ZERO]);
     const B1: u64 = 263;
 
-    const B: GFp5 = QuinticExtension([GFp::ZERO, GoldilocksField(Self::B1), GFp::ZERO, GFp::ZERO, GFp::ZERO]);
+    const B: GFp5 = QuinticExtension([
+        GFp::ZERO,
+        GoldilocksField(Self::B1),
+        GFp::ZERO,
+        GFp::ZERO,
+        GFp::ZERO,
+    ]);
 
     // 2*b
     const B_MUL2: GFp5 = QuinticExtension([
@@ -86,7 +92,6 @@ impl Point {
         GFp::ZERO,
     ]);
 
-
     // curve equation `B` constant in short Weierstrass form
     pub(crate) const B_WEIRSTRASS: GFp5 = QuinticExtension([
         GoldilocksField(15713893096167979237),
@@ -95,8 +100,6 @@ impl Point {
         GFp::ZERO,
         GFp::ZERO,
     ]);
-
-
 
     /// The neutral point (neutral of the group law).
     pub const NEUTRAL: Self = Self {
@@ -328,7 +331,7 @@ impl Point {
         let mut w1 = t2 - (x0 + z0).double() * t3;
         let mut t4 = w1.square();
         let mut t5 = z1.square();
-        let mut x = t5.square( ) * Self::B_MUL16;
+        let mut x = t5.square() * Self::B_MUL16;
         let mut w = x1.double() - t5 * GFp5::from_canonical_u16(4) - t4;
         let mut z = (w1 + z1).square() - t4 - t5;
 
@@ -511,7 +514,7 @@ impl Point {
     /// This is the main operation in Schnorr signature verification.
     /// WARNING: this function is not constant-time; use only on
     /// public data.
-    pub fn verify_muladd_vartime(self, s: Scalar, k: Scalar, r :Self) -> bool {
+    pub fn verify_muladd_vartime(self, s: Scalar, k: Scalar, r: Self) -> bool {
         // We use a method by Antipa et al (SAC 2005), following the
         // description in: https://eprint.iacr.org/2020/454
         // We split k into two (signed) integers c0 and c1 such
@@ -1428,7 +1431,7 @@ mod tests {
             let e = Scalar::from_noncanonical_bytes(&ebuf);
             let p1 = Point::GENERATOR * e;
             let p2 = Point::mulgen(e);
-            
+
             assert_eq!(p1, p2);
         }
     }
@@ -1449,7 +1452,7 @@ mod tests {
             let k = Scalar::from_noncanonical_bytes(&kbuf);
 
             let q = Point::mulgen(e);
-            let r = Point::mulgen(s) + k*q;
+            let r = Point::mulgen(s) + k * q;
             assert!(q.verify_muladd_vartime(s, k, r));
 
             let r2 = r + Point::GENERATOR;
