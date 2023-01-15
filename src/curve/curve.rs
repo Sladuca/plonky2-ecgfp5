@@ -596,6 +596,8 @@ impl AffinePoint {
 
         if c != 0 {
             self.u = -u
+        } else {
+            self.u = u
         }
     }
 
@@ -1239,24 +1241,24 @@ mod tests {
         for n in 1..(tab1.len() + 1) {
             let tab2 = Point::batch_to_affine(&tab1);
             for i in 0..n {
-                assert!((tab1[i].z * tab2[i].x) == (tab1[i].x));
-                assert!((tab1[i].t * tab2[i].u) == (tab1[i].u));
+                assert_eq!(tab1[i].z * tab2[i].x, tab1[i].x);
+                assert_eq!(tab1[i].t * tab2[i].u, tab1[i].u);
             }
         }
 
         // Test lookup.
         let win = Point::batch_to_affine(&tab1);
         let p1_affine = AffinePoint::lookup(&win, 0);
-        assert!(p1_affine.x == GFp5::ZERO);
-        assert!(p1_affine.u == GFp5::ZERO);
+        assert_eq!(p1_affine.x, GFp5::ZERO);
+        assert_eq!(p1_affine.u, GFp5::ZERO);
         for i in 1..9 {
             let p2_affine = AffinePoint::lookup(&win, i as i32);
-            assert!((tab1[i - 1].z * p2_affine.x) == (tab1[i - 1].x));
-            assert!((tab1[i - 1].t * p2_affine.u) == (tab1[i - 1].u));
+            assert_eq!(tab1[i - 1].z * p2_affine.x, tab1[i - 1].x);
+            assert_eq!(tab1[i - 1].t * p2_affine.u, tab1[i - 1].u);
 
             let p3_affine = AffinePoint::lookup(&win, -(i as i32));
-            assert!((tab1[i - 1].z * p3_affine.x) == (tab1[i - 1].x));
-            assert!((tab1[i - 1].t * p3_affine.u) == (-tab1[i - 1].u));
+            assert_eq!(tab1[i - 1].z * p3_affine.x, tab1[i - 1].x);
+            assert_eq!(tab1[i - 1].t * p3_affine.u, -tab1[i - 1].u);
         }
     }
 
