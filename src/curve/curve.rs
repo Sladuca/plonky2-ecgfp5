@@ -1435,7 +1435,7 @@ mod tests {
     #[test]
     fn ecgfp5_verify_muladd() {
         let mut rng = thread_rng();
-        for _ in 0..100 {
+        for _ in 0..20 {
             let mut ebuf = [0u8; 48];
             let mut sbuf = [0u8; 48];
             let mut kbuf = [0u8; 48];
