@@ -421,7 +421,6 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 c: GFp5,
                 a: QuinticExtensionTarget,
             ) -> QuinticExtensionTarget {
-                let QuinticExtensionTarget([b0, b1, b2, b3, b4]) = a;
                 let c = self.constant_quintic_ext(c);
                 self.mul_quintic_ext(c, a)
             }
@@ -740,7 +739,6 @@ impl SimpleGenerator<GFp> for QuinticSqrtGenerator {
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-    use plonky2::field::extension::quintic::QuinticExtension;
     use plonky2::field::types::{Field, Sample};
     use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_builder::CircuitBuilder;

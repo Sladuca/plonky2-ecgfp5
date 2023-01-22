@@ -1,6 +1,7 @@
-// this is mostly copied from https://github.com/pornin/ecgfp5
-// and adapted to build atop plonky2 primitives
-// note - unlike the original, this is not constant time
+/// EcGFp5 curve implementation
+/// Most of this is copied from Thomas Pornin's implementation
+/// with some modifications to make it play more nicely with plonky2 primitives
+/// His implementation can be found here: https://github.com/pornin/ecgfp5
 
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
@@ -180,6 +181,7 @@ impl Point {
         }
     }
 
+    // TODO: we can do better than this
     pub fn to_weierstraass(&self) -> ShortWeierstrassPoint {
         let w = self.encode();
         Self::decode_to_weierstraass(w).unwrap()

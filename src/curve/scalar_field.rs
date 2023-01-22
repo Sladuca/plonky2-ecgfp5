@@ -2,6 +2,7 @@
 /// Most of this is copied from Thomas Pornin's implementation
 /// with some modifications to make it play more nicely with plonky2 primitives
 /// His implementation can be found here: https://github.com/pornin/ecgfp5
+
 use alloc::vec::Vec;
 use core::fmt::{self, Debug, Display, Formatter};
 use core::hash::{Hash, Hasher};
