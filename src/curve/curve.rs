@@ -10,7 +10,7 @@ use plonky2_field::goldilocks_field::GoldilocksField;
 use plonky2_field::ops::Square;
 use plonky2_field::types::Field;
 
-use crate::curve::base_field::{Half, Legendre, SquareRoot};
+use crate::curve::base_field::{Legendre, SquareRoot};
 use crate::curve::mul_table::*;
 use crate::curve::scalar_field::Scalar;
 use crate::curve::{GFp, GFp5};
@@ -92,15 +92,6 @@ impl Point {
         GFp::ZERO,
     ]);
 
-    // curve equation `B` constant in short Weierstrass form
-    pub(crate) const B_WEIRSTRASS: GFp5 = QuinticExtension([
-        GoldilocksField(15713893096167979237),
-        GoldilocksField(6148914689804861265),
-        GFp::ZERO,
-        GFp::ZERO,
-        GFp::ZERO,
-    ]);
-
     /// The neutral point (neutral of the group law).
     pub const NEUTRAL: Self = Self {
         x: GFp5::ZERO,
@@ -120,13 +111,19 @@ impl Point {
         ]),
         z: GFp5::ONE,
         u: QuinticExtension([
-            GoldilocksField(13835058052060938241),
+            GoldilocksField(1),
             GFp::ZERO,
             GFp::ZERO,
             GFp::ZERO,
             GFp::ZERO,
         ]),
-        t: GFp5::ONE,
+        t: QuinticExtension([
+            GoldilocksField(4),
+            GFp::ZERO,
+            GFp::ZERO,
+            GFp::ZERO,
+            GFp::ZERO,
+        ]),
     };
 
     /// Encode this point into a field element. Encoding is always
@@ -163,8 +160,8 @@ impl Point {
         let c = r.is_some();
         let r = r.unwrap_or(GFp5::ZERO);
 
-        let x1 = (e + r).half();
-        let x2 = (e - r).half();
+        let x1 = (e + r) / GFp5::TWO;
+        let x2 = (e - r) / GFp5::TWO;
         let x = if x1.legendre() == GFp::ONE { x2 } else { x1 };
 
         // If c == true (delta is not a sqrt) then we want to get the neutral here; note that if
@@ -195,8 +192,8 @@ impl Point {
         let c = r.is_some();
         let r = r.unwrap_or(GFp5::ZERO);
 
-        let x1 = (e + r).half();
-        let x2 = (e - r).half();
+        let x1 = (e + r) / GFp5::TWO;
+        let x2 = (e - r) / GFp5::TWO;
         let x = if x1.legendre() == GFp::ONE { x1 } else { x2 };
 
         let x = if c {
@@ -448,9 +445,8 @@ impl Point {
         let mut digits = [0; (319 + Self::WINDOW) / Self::WINDOW];
         s.recode_signed(&mut digits, Self::WINDOW as i32);
 
-        *self = AffinePoint::lookup_vartime(&win, digits[digits.len() - 1]).to_point();
-
-        for &digit in digits.iter().rev() {
+        *self = AffinePoint::lookup_vartime(&win, *digits.last().unwrap()).to_point();
+        for &digit in digits.iter().rev().skip(1) {
             self.set_mdouble(Self::WINDOW as u32);
             *self += AffinePoint::lookup(&win, digit);
         }
@@ -460,11 +456,10 @@ impl Point {
     /// This function is faster than using the multiplication operator
     /// on the generator point.
     pub fn mulgen(s: Scalar) -> Self {
-        // Precomputed tables are for j*(2^(80*i))*G, for i = 0 to 3
-        // and j = 1 to 16, i.e. 5-bit windows.
         let mut digits = [0i32; 64];
         s.recode_signed(&mut digits, 5);
         let mut p = AffinePoint::lookup(&MUL_TABLE_G0, digits[7]).to_point();
+
         p += AffinePoint::lookup(&MUL_TABLE_G40, digits[15]);
         p += AffinePoint::lookup(&MUL_TABLE_G80, digits[23]);
         p += AffinePoint::lookup(&MUL_TABLE_G120, digits[31]);
@@ -620,7 +615,7 @@ impl AffinePoint {
         self.u = u;
 
         if c != 0 {
-            self.set_neg();
+            self.u = -self.u;
         }
     }
 

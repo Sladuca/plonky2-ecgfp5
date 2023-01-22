@@ -62,23 +62,6 @@ impl InverseOrZero for GFp5 {
     }
 }
 
-pub trait Half {
-    fn half(&self) -> Self;
-}
-
-impl Half for QuinticExtension<GFp> {
-    fn half(&self) -> Self {
-        let QuinticExtension([a0, a1, a2, a3, a4]) = *self;
-        QuinticExtension([
-            a0 / GFp::TWO,
-            a1 / GFp::TWO,
-            a2 / GFp::TWO,
-            a3 / GFp::TWO,
-            a4 / GFp::TWO,
-        ])
-    }
-}
-
 pub trait Sgn0 {
     fn sgn0(&self) -> bool;
 }
@@ -137,7 +120,6 @@ pub(crate) fn sqrt_quintic_ext_goldilocks(x: GFp5) -> Option<GFp5> {
 
 #[cfg(test)]
 mod tests {
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
     use plonky2_field::types::Sample;
     use rand::thread_rng;
 
