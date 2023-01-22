@@ -9,6 +9,8 @@ use plonky2::iop::target::Target;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2_ecdsa::gadgets::biguint::CircuitBuilderBiguint;
 use plonky2_ecdsa::gadgets::nonnative::{CircuitBuilderNonNative, NonNativeTarget};
+use plonky2_field::extension::quintic::QuinticExtension;
+use plonky2_field::goldilocks_field::GoldilocksField;
 
 pub fn scalar_field_order() -> BigUint {
     let mut res = BigUint::from_u128(25 * 5 * 163 * 769 * 1059871).unwrap();
@@ -27,6 +29,14 @@ pub fn scalar_field_order() -> BigUint {
             });
     res * big_factor
 }
+
+const THREE: GFp5 = QuinticExtension([
+    GoldilocksField(3),
+    GFp::ZERO,
+    GFp::ZERO,
+    GFp::ZERO,
+    GFp::ZERO,
+]);
 
 #[derive(Copy, Clone, Debug)]
 #[repr(transparent)]
@@ -137,14 +147,14 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 let sx = self.is_equal_quintic_ext(x1, x2);
                 let sy = self.is_equal_quintic_ext(y1, y2);
 
-                let mut lambda_0_if_sx_0 = self.sub_quintic_ext(y2, y1);
-                let lambda_0_if_sx_1 = self.square_quintic_ext(x1);
-                lambda_0_if_sx_0 = self.mul_const_quintic_ext(three, lambda_0_if_sx_0);
-                lambda_0_if_sx_0 =
-                    self.add_const_quintic_ext(lambda_0_if_sx_0, Point::A_WEIRSTRASS);
+                let lambda_0_if_sx_0 = self.sub_quintic_ext(y2, y1);
+                let mut lambda_0_if_sx_1 = self.square_quintic_ext(x1);
+                lambda_0_if_sx_1 = self.mul_const_quintic_ext(THREE, lambda_0_if_sx_1);
+                lambda_0_if_sx_1 =
+                    self.add_const_quintic_ext(lambda_0_if_sx_1, Point::A_WEIRSTRASS);
 
-                let lambda_1_if_sx_0 = self.add_quintic_ext(y1, y1);
-                let lambda_1_if_sx_1 = self.sub_quintic_ext(x2, x1);
+                let lambda_1_if_sx_0 = self.sub_quintic_ext(x2, x1);
+                let lambda_1_if_sx_1 = self.mul_const_quintic_ext(GFp5::TWO, y1);
 
                 // note: paper has a typo. select opposite what the paper says
                 let lambda_0 = self.select_quintic_ext(sx, lambda_0_if_sx_0, lambda_0_if_sx_1);
@@ -166,9 +176,25 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 self.curve_select(b_is_inf, a, sel)
             }
 
-            // TODO: optimize
             fn curve_double(&mut self, a: CurveTarget) -> CurveTarget {
-                self.curve_add(a, a)
+                let CurveTarget(([x, y], is_inf)) = a;
+
+                let mut lambda_0 = self.square_quintic_ext(x);
+                lambda_0 = self.mul_const_quintic_ext(THREE, lambda_0);
+                lambda_0 = self.add_const_quintic_ext(lambda_0, Point::A_WEIRSTRASS);
+                let lambda_1 = self.mul_const_quintic_ext(GFp5::TWO, y);
+
+                let lambda = self.div_quintic_ext(lambda_0, lambda_1);
+
+                let mut x2 = self.square_quintic_ext(lambda);
+                let two_x = self.mul_const_quintic_ext(GFp5::TWO, x);
+                x2 = self.sub_quintic_ext(x2, two_x);
+
+                let mut y2 = self.sub_quintic_ext(x, x2);
+                y2 = self.mul_quintic_ext(lambda, y2);
+                y2 = self.sub_quintic_ext(y2, y);
+
+                CurveTarget(([x2, y2], is_inf))
             }
 
             /// a: the point to multiply by
