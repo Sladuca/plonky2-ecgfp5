@@ -39,11 +39,94 @@ pub(crate) struct AffinePoint {
 
 /// A curve point in short Weirstrass form (x, y). This is used by the in-circuit representation
 #[derive(Clone, Copy, Debug)]
-pub struct ShortWeierstrassPoint {
+pub struct AffinePointWithFlag {
     pub(crate) x: GFp5,
     pub(crate) y: GFp5,
     pub(crate) is_inf: bool,
 }
+
+impl AffinePointWithFlag {
+    // curve equation `A` constants when in short Weierstrass form
+    pub const A: GFp5 = QuinticExtension([
+        GoldilocksField(6148914689804861439),
+        GoldilocksField(263),
+        GFp::ZERO,
+        GFp::ZERO,
+        GFp::ZERO,
+    ]);
+
+    pub const B: GFp5 = QuinticExtension([
+        GoldilocksField(15713893096167979237),
+        GoldilocksField(6148914689804861265),
+        GFp::ZERO,
+        GFp::ZERO,
+        GFp::ZERO,
+    ]);
+
+    pub const NEUTRAL: Self = Self {
+        x: GFp5::ZERO,
+        y: GFp5::ZERO,
+        is_inf: true,
+    };
+
+    pub const GENERATOR: Self = Self {
+        x: QuinticExtension([
+            GoldilocksField(12883135586176881569),
+            GoldilocksField(4356519642755055268),
+            GoldilocksField(5248930565894896907),
+            GoldilocksField(2165973894480315022),
+            GoldilocksField(2448410071095648785),
+        ]),
+        y: QuinticExtension([
+            GoldilocksField(13835058052060938241),
+            GFp::ZERO,
+            GFp::ZERO,
+            GFp::ZERO,
+            GFp::ZERO,
+        ]),
+        is_inf: false,
+    };
+
+    pub fn decode(w: GFp5) -> Option<Self> {
+        let e = w.square() - Point::A;
+        let delta = e.square() - Point::B_MUL4;
+        let r = delta.sqrt();
+        let c = r.is_some();
+        let r = r.unwrap_or(GFp5::ZERO);
+
+        let x1 = (e + r) / GFp5::TWO;
+        let x2 = (e - r) / GFp5::TWO;
+
+        let x = if x1.legendre() == GFp::ONE { x1 } else { x2 };
+
+        let y = -w * x;
+        let x = if c {
+            x + Point::A / GFp5::from_canonical_u16(3)
+        } else {
+            GFp5::ZERO
+        };
+        let is_inf = !c;
+
+        // If w == 0 then this is in fact a success.
+        if c || w == GFp5::ZERO {
+            Some(AffinePointWithFlag { x, y, is_inf })
+        } else {
+            None
+        }
+    }
+}
+
+impl PartialEq for AffinePointWithFlag {
+    fn eq(&self, other: &Self) -> bool {
+        if self.is_inf && other.is_inf {
+            true
+        } else {
+            self.x == other.x && self.y == other.y
+        }
+    }
+}
+
+impl Eq for AffinePointWithFlag {}
 
 impl Point {
     // Curve equation 'a' constant.
@@ -83,14 +166,6 @@ impl Point {
         GFp::ZERO,
     ]);
 
-    // curve equation `A` constants when in short Weierstrass form
-    pub(crate) const A_WEIRSTRASS: GFp5 = QuinticExtension([
-        GoldilocksField(6148914689804861439),
-        GoldilocksField(263),
-        GFp::ZERO,
-        GFp::ZERO,
-        GFp::ZERO,
-    ]);
 
     /// The neutral point (neutral of the group law).
     pub const NEUTRAL: Self = Self {
@@ -180,37 +255,10 @@ impl Point {
         }
     }
 
-    // TODO: we can do better than this
-    pub fn to_weierstraass(&self) -> ShortWeierstrassPoint {
+    // TODO: this can be better
+    pub fn to_weierstraass(&self) -> AffinePointWithFlag {
         let w = self.encode();
-        Self::decode_to_weierstraass(w).unwrap()
-    }
-
-    pub fn decode_to_weierstraass(w: GFp5) -> Option<ShortWeierstrassPoint> {
-        let e = w.square() - Self::A;
-        let delta = e.square() - Self::B_MUL4;
-        let r = delta.sqrt();
-        let c = r.is_some();
-        let r = r.unwrap_or(GFp5::ZERO);
-
-        let x1 = (e + r) / GFp5::TWO;
-        let x2 = (e - r) / GFp5::TWO;
-        let x = if x1.legendre() == GFp::ONE { x1 } else { x2 };
-
-        let x = if c {
-            x + Self::A / GFp5::from_canonical_u16(3)
-        } else {
-            GFp5::ZERO
-        };
-        let y = -w * x;
-        let is_inf = !c;
-
-        // If w == 0 then this is in fact a success.
-        if c || w == GFp5::ZERO {
-            Some(ShortWeierstrassPoint { x, y, is_inf })
-        } else {
-            None
-        }
+        AffinePointWithFlag::decode(w).unwrap()
     }
 
     // General point addition. formulas are complete (no special case).
@@ -1139,13 +1187,11 @@ mod tests {
     };
     use rand::{thread_rng, Rng};
 
-    use crate::curve::{base_field::InverseOrZero, scalar_field::Scalar, GFp5};
+    use crate::curve::{base_field::InverseOrZero, scalar_field::Scalar, GFp5, GFp};
 
-    use super::{AffinePoint, Point};
+    use super::{AffinePoint, Point, AffinePointWithFlag};
 
-    #[test]
-    fn test_basic_ops() {
-        // Test vectors generated with Sage.
+    fn test_vectors() -> [GFp5; 8] {
         // P0 is neutral of G.
         // P1 is a random point in G (encoded as w1)
         // P2 = e*P1 in G (encoded as w2)
@@ -1205,6 +1251,14 @@ mod tests {
             GoldilocksField(13395190104221781928),
             GoldilocksField(16359223219913018041),
         ]);
+
+        [w0, w1, w2, w3, w4, w5, w6, w7]
+    }
+
+    #[test]
+    fn test_basic_ops() {
+        let [w0, w1, w2, w3, w4, w5, w6, w7] = test_vectors();
+
 
         // Values that should not decode successfully.
         let bww: [GFp5; 6] = [
@@ -1409,12 +1463,163 @@ mod tests {
     }
 
     #[test]
-    fn decode_generator() {
-        let g = Point::decode(GFp5::from_canonical_u16(4)).expect("4 should successfully decode");
-        assert_eq!(g, Point::GENERATOR);
+    fn test_decode_weierstrass() {
+        let [w0, w1, w2, w3, w4, w5, w6, w7] = test_vectors();
 
-        assert_eq!(Point::encode(Point::GENERATOR), GFp5::from_canonical_u16(4));
-        assert_eq!(Point::encode(g), GFp5::from_canonical_u16(4));
+        let p0_expected = AffinePointWithFlag {
+            x: QuinticExtension([
+                GoldilocksField(6148914689804861440),
+                GFp::ZERO,
+                GFp::ZERO,
+                GFp::ZERO,
+                GFp::ZERO,
+            ]),
+            y: GFp5::ZERO,
+            is_inf: true,
+        };
+        let p0 = AffinePointWithFlag::decode(w0).expect("w0 should successfully decode");
+        assert_eq!(p0, p0_expected);
+
+        let p1_expected = AffinePointWithFlag {
+            x: QuinticExtension([
+                GoldilocksField(7887569478949190020),
+                GoldilocksField(11586418388990522938),
+                GoldilocksField(13676447623055915878),
+                GoldilocksField(5945168854809921881),
+                GoldilocksField(16291886980725359814),
+            ]),
+            y: QuinticExtension([
+                GoldilocksField(7556511254681645335),
+                GoldilocksField(17611929280367064763),
+                GoldilocksField(9410908488141053806),
+                GoldilocksField(11351540010214108766),
+                GoldilocksField(4846226015431423207),
+            ]),
+            is_inf: false,
+        };
+        let p1 = AffinePointWithFlag::decode(w1).expect("w1 should successfully decode");
+        assert_eq!(p1, p1_expected);
+
+        let p2_expected = AffinePointWithFlag {
+            x: QuinticExtension([
+                GoldilocksField(11231216549003316587),
+                GoldilocksField(17312878720767554617),
+                GoldilocksField(5614299211412933260),
+                GoldilocksField(2256199868722187419),
+                GoldilocksField(14229722163821261464),
+            ]),
+            y: QuinticExtension([
+                GoldilocksField(11740132275098847128),
+                GoldilocksField(18250632754932612452),
+                GoldilocksField(6988589976052950880),
+                GoldilocksField(13612651576898186637),
+                GoldilocksField(16040252831112129154),
+            ]),
+            is_inf: false,
+        };
+        let p2 = AffinePointWithFlag::decode(w2).expect("w2 should successfully decode");
+        assert_eq!(p2, p2_expected);
+
+        let p3_expected = AffinePointWithFlag {
+            x: QuinticExtension([
+                GoldilocksField(567456832026211571),
+                GoldilocksField(6401615614732569674),
+                GoldilocksField(7303004494044972219),
+                GoldilocksField(4332356015409706768),
+                GoldilocksField(4663512734739523713),
+            ]),
+            y: QuinticExtension([
+                GoldilocksField(13838792670272995877),
+                GoldilocksField(11742686110311813089),
+                GoldilocksField(17972799251722850796),
+                GoldilocksField(8534723577625674697),
+                GoldilocksField(3138422718990519265),
+            ]),
+            is_inf: false,
+        };
+        let p3 = AffinePointWithFlag::decode(w3).expect("w3 should successfully decode");
+        assert_eq!(p3, p3_expected);
+
+        let p4_expected = AffinePointWithFlag {
+            x: QuinticExtension([
+                GoldilocksField(2626390539619063455),
+                GoldilocksField(3069873143820007175),
+                GoldilocksField(16481805966921623903),
+                GoldilocksField(2169403494164322467),
+                GoldilocksField(15849876939764656634),
+            ]),
+            y: QuinticExtension([
+                GoldilocksField(8052493994140007067),
+                GoldilocksField(12476750341447220703),
+                GoldilocksField(7297584762312352412),
+                GoldilocksField(4456043296886321460),
+                GoldilocksField(17416054515469523789),
+            ]),
+            is_inf: false,
+        };
+        let p4 = AffinePointWithFlag::decode(w4).expect("w4 should successfully decode");
+        assert_eq!(p4, p4_expected);
+
+        let p5_expected = AffinePointWithFlag {
+            x: QuinticExtension([
+                GoldilocksField(3378618241466923429),
+                GoldilocksField(1600085176765664645),
+                GoldilocksField(8450735902517439914),
+                GoldilocksField(879305481131694650),
+                GoldilocksField(9249368002914244868),
+            ]),
+            y: QuinticExtension([
+                GoldilocksField(7063301786803892166),
+                GoldilocksField(16450112846546843898),
+                GoldilocksField(13291990378137922105),
+                GoldilocksField(17122501309646837992),
+                GoldilocksField(13551174888872382132),
+            ]),
+            is_inf: false,
+        };
+        let p5 = AffinePointWithFlag::decode(w5).expect("w5 should successfully decode");
+        assert_eq!(p5, p5_expected);
+
+
+        let p6_expected = AffinePointWithFlag {
+            x: QuinticExtension([
+                GoldilocksField(12792842147978866906),
+                GoldilocksField(10605017725125541653),
+                GoldilocksField(7515179057747849898),
+                GoldilocksField(4244613931017322576),
+                GoldilocksField(5015379385130367832),
+            ]),
+            y: QuinticExtension([
+                GoldilocksField(11618884250209642346),
+                GoldilocksField(14788516166813429253),
+                GoldilocksField(7317520700234795285),
+                GoldilocksField(12825292405177435802),
+                GoldilocksField(17658454967394645353),
+            ]),
+            is_inf: false,
+        };
+        let p6 = AffinePointWithFlag::decode(w6).expect("w6 should successfully decode");
+        assert_eq!(p6, p6_expected);
+
+        let p7_expected = AffinePointWithFlag {
+            x: QuinticExtension([
+                GoldilocksField(10440794216646581227),
+                GoldilocksField(13992847258701590930),
+                GoldilocksField(11213401763785319360),
+                GoldilocksField(12830171931568113117),
+                GoldilocksField(6220154342199499160),
+            ]),
+            y: QuinticExtension([
+                GoldilocksField(7971683838841472962),
+                GoldilocksField(1639066249976938469),
+                GoldilocksField(15015315060237521031),
+                GoldilocksField(10847769264696425470),
+                GoldilocksField(9177491810370773777),
+            ]),
+            is_inf: false,
+        };
+        let p7 = AffinePointWithFlag::decode(w7).expect("w7 should successfully decode");
+        assert_eq!(p7, p7_expected);
     }
 
     #[test]

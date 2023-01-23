@@ -1,5 +1,5 @@
 use crate::curve::scalar_field::Scalar;
-use crate::curve::{curve::Point, GFp, GFp5};
+use crate::curve::{curve::AffinePointWithFlag, GFp, GFp5};
 use crate::gadgets::base_field::{CircuitBuilderGFp5, QuinticExtensionTarget};
 use num::{BigUint, FromPrimitive, Zero};
 use plonky2::field::extension::FieldExtension;
@@ -44,7 +44,7 @@ pub struct CurveTarget(([QuinticExtensionTarget; 2], BoolTarget));
 
 pub trait CircuitBuilderEcGFp5 {
     fn add_virtual_curve_target(&mut self) -> CurveTarget;
-    fn curve_constant(&mut self, x: GFp5, y: GFp5, is_inf: bool) -> CurveTarget;
+    fn curve_constant(&mut self, point: AffinePointWithFlag) -> CurveTarget;
     fn curve_zero(&mut self) -> CurveTarget;
     fn curve_generator(&mut self) -> CurveTarget;
     fn curve_select(&mut self, cond: BoolTarget, a: CurveTarget, b: CurveTarget) -> CurveTarget;
@@ -68,7 +68,9 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 CurveTarget(([x, y], is_inf))
             }
 
-            fn curve_constant(&mut self, x: GFp5, y: GFp5, is_inf: bool) -> CurveTarget {
+            fn curve_constant(&mut self, point: AffinePointWithFlag) -> CurveTarget {
+                let AffinePointWithFlag { x, y, is_inf } = point;
+
                 let x = self.constant_quintic_ext(x);
                 let y = self.constant_quintic_ext(y);
                 let is_inf = self.constant_bool(is_inf);
@@ -76,27 +78,11 @@ macro_rules! impl_circuit_builder_for_extension_degree {
             }
 
             fn curve_zero(&mut self) -> CurveTarget {
-                self.curve_constant(GFp5::ZERO, GFp5::ZERO, true)
+                self.curve_constant(AffinePointWithFlag::NEUTRAL)
             }
 
             fn curve_generator(&mut self) -> CurveTarget {
-                let x = GFp5::from_basefield_array([
-                    GFp::from_noncanonical_u64(12883135586176881569),
-                    GFp::from_noncanonical_u64(4356519642755055268),
-                    GFp::from_noncanonical_u64(5248930565894896907),
-                    GFp::from_noncanonical_u64(2165973894480315022),
-                    GFp::from_noncanonical_u64(2448410071095648785),
-                ]);
-
-                let y = GFp5::from_basefield_array([
-                    GFp::from_noncanonical_u64(13835058052060938241),
-                    GFp::from_noncanonical_u64(0),
-                    GFp::from_noncanonical_u64(0),
-                    GFp::from_noncanonical_u64(0),
-                    GFp::from_noncanonical_u64(0),
-                ]);
-
-                self.curve_constant(x, y, false)
+                self.curve_constant(AffinePointWithFlag::GENERATOR)
             }
 
             fn curve_select(
@@ -151,7 +137,7 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 let mut lambda_0_if_sx_1 = self.square_quintic_ext(x1);
                 lambda_0_if_sx_1 = self.mul_const_quintic_ext(THREE, lambda_0_if_sx_1);
                 lambda_0_if_sx_1 =
-                    self.add_const_quintic_ext(lambda_0_if_sx_1, Point::A_WEIRSTRASS);
+                    self.add_const_quintic_ext(lambda_0_if_sx_1, AffinePointWithFlag::A);
 
                 let lambda_1_if_sx_0 = self.sub_quintic_ext(x2, x1);
                 let lambda_1_if_sx_1 = self.mul_const_quintic_ext(GFp5::TWO, y1);
@@ -181,7 +167,7 @@ macro_rules! impl_circuit_builder_for_extension_degree {
 
                 let mut lambda_0 = self.square_quintic_ext(x);
                 lambda_0 = self.mul_const_quintic_ext(THREE, lambda_0);
-                lambda_0 = self.add_const_quintic_ext(lambda_0, Point::A_WEIRSTRASS);
+                lambda_0 = self.add_const_quintic_ext(lambda_0, AffinePointWithFlag::A);
                 let lambda_1 = self.mul_const_quintic_ext(GFp5::TWO, y);
 
                 let lambda = self.div_quintic_ext(lambda_0, lambda_1);
