@@ -141,7 +141,6 @@ macro_rules! impl_circuit_builder_for_extension_degree {
             fn curve_add(&mut self, a: CurveTarget, b: CurveTarget) -> CurveTarget {
                 let CurveTarget(([x1, y1], a_is_inf)) = a;
                 let CurveTarget(([x2, y2], b_is_inf)) = b;
-                let three = GFp5::from_canonical_u16(3);
 
                 let sx = self.is_equal_quintic_ext(x1, x2);
                 let sy = self.is_equal_quintic_ext(y1, y2);
