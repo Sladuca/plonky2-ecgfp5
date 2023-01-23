@@ -119,20 +119,32 @@ pub trait CircuitBuilderGFp5<F: RichField + Extendable<5>> {
 
 pub trait PartialWitnessQuinticExt<F: RichField + Extendable<5>>: Witness<F> {
     fn get_quintic_ext_target(&self, target: QuinticExtensionTarget) -> QuinticExtension<F>;
+
     fn get_quintic_ext_targets(
         &self,
         targets: &[QuinticExtensionTarget],
-    ) -> Vec<QuinticExtension<F>>;
+    ) -> Vec<QuinticExtension<F>> {
+        targets
+            .iter()
+            .map(|&t| self.get_quintic_ext_target(t))
+            .collect()
+    }
+
     fn set_quintic_ext_target(
         &mut self,
         target: QuinticExtensionTarget,
         value: QuinticExtension<F>,
     );
+
     fn set_quintic_ext_targets(
         &mut self,
         targets: &[QuinticExtensionTarget],
         values: &[QuinticExtension<F>],
-    );
+    ) {
+        for (&t, &v) in targets.iter().zip(values.iter()) {
+            self.set_quintic_ext_target(t, v);
+        }
+    }
 }
 
 impl<W: Witness<F>, F: RichField + Extendable<5>> PartialWitnessQuinticExt<F> for W {
@@ -145,16 +157,6 @@ impl<W: Witness<F>, F: RichField + Extendable<5>> PartialWitnessQuinticExt<F> fo
             self.get_target(t3),
             self.get_target(t4),
         ])
-    }
-
-    fn get_quintic_ext_targets(
-        &self,
-        targets: &[QuinticExtensionTarget],
-    ) -> Vec<QuinticExtension<F>> {
-        targets
-            .iter()
-            .map(|&t| self.get_quintic_ext_target(t))
-            .collect()
     }
 
     fn set_quintic_ext_target(
@@ -172,15 +174,6 @@ impl<W: Witness<F>, F: RichField + Extendable<5>> PartialWitnessQuinticExt<F> fo
         self.set_target(t4, v4);
     }
 
-    fn set_quintic_ext_targets(
-        &mut self,
-        targets: &[QuinticExtensionTarget],
-        values: &[QuinticExtension<F>],
-    ) {
-        for (&t, &v) in targets.iter().zip(values.iter()) {
-            self.set_quintic_ext_target(t, v);
-        }
-    }
 }
 
 macro_rules! impl_circuit_builder_for_extension_degree {

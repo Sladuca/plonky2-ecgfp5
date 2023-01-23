@@ -256,7 +256,7 @@ impl Point {
     }
 
     // TODO: this can be better
-    pub fn to_weierstraass(&self) -> AffinePointWithFlag {
+    pub fn to_affine_with_flag(&self) -> AffinePointWithFlag {
         let w = self.encode();
         AffinePointWithFlag::decode(w).unwrap()
     }

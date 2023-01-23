@@ -4,13 +4,18 @@ use crate::gadgets::base_field::{CircuitBuilderGFp5, QuinticExtensionTarget};
 use num::{BigUint, FromPrimitive, Zero};
 use plonky2::field::extension::FieldExtension;
 use plonky2::field::types::{Field, Field64};
+use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::BoolTarget;
 use plonky2::iop::target::Target;
+use plonky2::iop::witness::Witness;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2_ecdsa::gadgets::biguint::CircuitBuilderBiguint;
 use plonky2_ecdsa::gadgets::nonnative::{CircuitBuilderNonNative, NonNativeTarget};
+use plonky2_field::extension::Extendable;
 use plonky2_field::extension::quintic::QuinticExtension;
 use plonky2_field::goldilocks_field::GoldilocksField;
+
+use super::base_field::PartialWitnessQuinticExt;
 
 pub fn scalar_field_order() -> BigUint {
     let mut res = BigUint::from_u128(25 * 5 * 163 * 769 * 1059871).unwrap();
@@ -44,6 +49,7 @@ pub struct CurveTarget(([QuinticExtensionTarget; 2], BoolTarget));
 
 pub trait CircuitBuilderEcGFp5 {
     fn add_virtual_curve_target(&mut self) -> CurveTarget;
+    fn register_curve_public_input(&mut self, point: CurveTarget);
     fn curve_constant(&mut self, point: AffinePointWithFlag) -> CurveTarget;
     fn curve_zero(&mut self) -> CurveTarget;
     fn curve_generator(&mut self) -> CurveTarget;
@@ -66,6 +72,13 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 let y = self.add_virtual_quintic_ext_target();
                 let is_inf = self.add_virtual_bool_target_safe();
                 CurveTarget(([x, y], is_inf))
+            }
+
+            fn register_curve_public_input(&mut self, point: CurveTarget) {
+                let CurveTarget(([x, y], is_inf)) = point;
+                self.register_quintic_ext_public_input(x);
+                self.register_quintic_ext_public_input(y);
+                self.register_public_input(is_inf.target);
             }
 
             fn curve_constant(&mut self, point: AffinePointWithFlag) -> CurveTarget {
@@ -248,7 +261,7 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 }
 
                 let mut window = vec![a];
-                for _ in 0..(1 << (WINDOW_BITS - 1)) {
+                for _ in 0..((1 << (WINDOW_BITS - 1)) - 1) {
                     let prev = window.last().unwrap();
                     window.push(self.curve_add(*prev, a));
                 }
@@ -332,3 +345,126 @@ impl_circuit_builder_for_extension_degree!(1);
 impl_circuit_builder_for_extension_degree!(2);
 impl_circuit_builder_for_extension_degree!(4);
 impl_circuit_builder_for_extension_degree!(5);
+
+
+pub trait PartialWitnessCurve<F: RichField + Extendable<5>>: Witness<F> {
+    fn get_curve_target(&self, target: CurveTarget) -> AffinePointWithFlag;
+    fn get_curve_targets(
+        &self,
+        targets: &[CurveTarget],
+    ) -> Vec<AffinePointWithFlag> {
+        targets.iter().map(|&t| self.get_curve_target(t)).collect()
+    }
+    
+    fn set_curve_target(
+        &mut self,
+        target: CurveTarget,
+        value: AffinePointWithFlag,
+    );
+
+    fn set_curve_targets(
+        &mut self,
+        targets: &[CurveTarget],
+        values: &[AffinePointWithFlag],
+    ) {
+        for (&t, &v) in targets.iter().zip(values.iter()) {
+            self.set_curve_target(t, v);
+        }
+    }
+}
+
+impl<W: PartialWitnessQuinticExt<GFp>> PartialWitnessCurve<GFp> for W {
+    fn get_curve_target(&self, target: CurveTarget) -> AffinePointWithFlag {
+        let CurveTarget(([x, y], is_inf)) = target;
+        let x = self.get_quintic_ext_target(x);
+        let y = self.get_quintic_ext_target(y);
+        let is_inf = self.get_bool_target(is_inf);
+        AffinePointWithFlag { x, y, is_inf }
+    }
+
+    fn set_curve_target(
+        &mut self,
+        target: CurveTarget,
+        value: AffinePointWithFlag,
+    ) {
+        let CurveTarget(([x, y], is_inf)) = target;
+        self.set_quintic_ext_target(x, value.x);
+        self.set_quintic_ext_target(y, value.y);
+        self.set_bool_target(is_inf, value.is_inf);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::Result;
+    use plonky2::{field::types::{Field, Sample}, plonk::{config::{PoseidonGoldilocksConfig, GenericConfig}, circuit_data::CircuitConfig}, iop::witness::PartialWitness};
+    use rand::{thread_rng, Rng};
+
+    use crate::curve::curve::Point;
+
+    use super::*;
+
+    fn random_point<R: Rng>(rng: &mut R) -> Point {
+        let scalar = Scalar::sample(rng);
+        Point::GENERATOR * scalar
+    }
+
+    #[test]
+    fn test_curve_add() -> Result<()> {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        let mut rng = thread_rng();
+
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+
+        let p1 = random_point(&mut rng);
+        let p2 = random_point(&mut rng);
+        let p3_expected = p1 + p2;
+
+        let p1 = builder.curve_constant(p1.to_affine_with_flag());
+        let p2 = builder.curve_constant(p2.to_affine_with_flag());
+        let p3 = builder.curve_add(p1, p2);
+        builder.register_curve_public_input(p3);
+        
+        let circuit = builder.build::<C>();
+
+        let mut pw = PartialWitness::new();
+        pw.set_curve_target(p3, p3_expected.to_affine_with_flag());
+
+        let proof = circuit.prove(pw)?;
+        circuit.verify(proof)
+    }
+
+    #[test]
+    fn test_curve_scalar_mul() -> Result<()> {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        let mut rng = thread_rng();
+
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+
+        let p = random_point(&mut rng);
+        let s = Scalar::sample(&mut rng);
+        let prod_expected = p * s;
+
+        let p = builder.curve_constant(p.to_affine_with_flag());
+        let s = builder.constant_nonnative(s);
+
+        let prod = builder.curve_scalar_mul(p, s);
+        builder.register_curve_public_input(prod);
+        
+        let circuit = builder.build::<C>();
+
+        let mut pw = PartialWitness::new();
+        pw.set_curve_target(prod, prod_expected.to_affine_with_flag());
+
+        let proof = circuit.prove(pw)?;
+        circuit.verify(proof)
+    }
+}
