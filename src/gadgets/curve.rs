@@ -440,6 +440,33 @@ mod tests {
     }
 
     #[test]
+    fn test_curve_double() -> Result<()> {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        let mut rng = thread_rng();
+
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+
+        let p1 = random_point(&mut rng);
+        let p2_expected = p1.double();
+
+        let p1 = builder.curve_constant(p1.to_affine_with_flag());
+        let p2 = builder.curve_double(p1);
+        builder.register_curve_public_input(p2);
+        
+        let circuit = builder.build::<C>();
+
+        let mut pw = PartialWitness::new();
+        pw.set_curve_target(p2, p2_expected.to_affine_with_flag());
+
+        let proof = circuit.prove(pw)?;
+        circuit.verify(proof)
+    }
+
+    #[test]
     fn test_curve_scalar_mul() -> Result<()> {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
