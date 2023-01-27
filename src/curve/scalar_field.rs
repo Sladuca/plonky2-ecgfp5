@@ -955,6 +955,8 @@ impl Signed640 {
 
 #[cfg(test)]
 mod tests {
+    use crate::test_field_arithmetic;
+
     use super::Scalar;
     use rand::{thread_rng, Rng};
 
@@ -1073,4 +1075,6 @@ mod tests {
             assert!((c1 * s - c0).iszero() == 0xFFFFFFFFFFFFFFFF);
         }
     }
+
+    test_field_arithmetic!(crate::curve::scalar_field::Scalar);
 }

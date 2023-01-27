@@ -1,8 +1,3 @@
-use alloc::vec::Vec;
-use plonky2_field::extension::{Extendable, Frobenius};
-use plonky2_field::ops::Square;
-use plonky2_field::types::{Field, PrimeField64, Sample};
-
 // These were copied straight from plonky2/field
 #[macro_export]
 macro_rules! test_field_arithmetic {

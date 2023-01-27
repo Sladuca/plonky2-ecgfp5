@@ -11,6 +11,7 @@ use plonky2::iop::witness::Witness;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2_ecdsa::gadgets::biguint::CircuitBuilderBiguint;
 use plonky2_ecdsa::gadgets::nonnative::{CircuitBuilderNonNative, NonNativeTarget};
+use plonky2_ecdsa::gadgets::split_nonnative::CircuitBuilderSplit;
 use plonky2_field::extension::Extendable;
 use plonky2_field::extension::quintic::QuinticExtension;
 use plonky2_field::goldilocks_field::GoldilocksField;
@@ -58,6 +59,7 @@ pub trait CircuitBuilderEcGFp5 {
 
     fn curve_add(&mut self, a: CurveTarget, b: CurveTarget) -> CurveTarget;
     fn curve_double(&mut self, a: CurveTarget) -> CurveTarget;
+    fn precompute_window(&mut self, a: CurveTarget, window_bits: usize) -> Vec<CurveTarget>;
     fn curve_scalar_mul(&mut self, a: CurveTarget, scalar: NonNativeTarget<Scalar>) -> CurveTarget;
 
     fn curve_encode_to_quintic_ext(&mut self, a: CurveTarget) -> QuinticExtensionTarget;
@@ -197,90 +199,37 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 CurveTarget(([x2, y2], is_inf))
             }
 
-            /// a: the point to multiply by
-            /// b: little-endian bit representation of the scalar (i.e. least-significant first)
+            fn precompute_window(&mut self, a: CurveTarget, window_bits: usize) -> Vec<CurveTarget> {
+                let mut multiples = vec![self.curve_zero()];
+                for _ in 1..(1 << window_bits) {
+                    multiples.push(
+                        self.curve_add(multiples.last().unwrap().clone(), a)
+                    );
+                }
+
+                multiples
+            }
+
             fn curve_scalar_mul(
                 &mut self,
                 a: CurveTarget,
                 scalar: NonNativeTarget<Scalar>,
             ) -> CurveTarget {
-                const WINDOW_BITS: usize = 4;
-                let zero = self.zero();
-                let one = self.one();
-                let n = self.constant_biguint(&scalar_field_order());
-                let max_digit = self.constant(GFp::from_canonical_u64(1 << WINDOW_BITS));
+                let window = self.precompute_window(a, 4);
+                let four_bit_limbs = self.split_nonnative_to_4_bit_limbs(&scalar);
 
-                let scalar_bigint = self.nonnative_to_canonical_biguint(&scalar);
-                let reduced_scalar = self.rem_biguint(&scalar_bigint, &n);
-                let scalar = self.add_biguint(&reduced_scalar, &n);
-                let scalar_bits = scalar
-                    .limbs
-                    .into_iter()
-                    .flat_map(|limb| self.split_le(limb.0, 32))
-                    .collect::<Vec<_>>();
-
-                let mut signs = Vec::new();
-                let mut digits = Vec::new();
-                let mut carry = self.constant_bool(false);
-                for chunk in scalar_bits.chunks_exact(WINDOW_BITS) {
-                    let terms = (0..WINDOW_BITS - 1)
-                        .map(|i| self.mul_const(GFp::from_canonical_u32(1 << i), chunk[i].target))
-                        .collect::<Vec<_>>();
-                    let lower_bits = self.add_many(terms);
-
-                    let mut d_if_lte_8 = self.mul_const_add(
-                        GFp::from_canonical_u32(1 << (WINDOW_BITS - 1)),
-                        chunk[WINDOW_BITS - 1].target,
-                        lower_bits,
-                    );
-                    d_if_lte_8 = self.add(d_if_lte_8, carry.target);
-
-                    let mut d_if_gt_8 = self.sub(d_if_lte_8, max_digit);
-                    d_if_gt_8 = self.neg(d_if_gt_8);
-
-                    let lower_bits_zero = self.is_equal(lower_bits, zero);
-                    let lower_bits_not_zero =
-                        BoolTarget::new_unsafe(self.sub(one, lower_bits_zero.target));
-
-                    // chunk on its own > 8
-                    let chunk_gt_8 = self.and(chunk[WINDOW_BITS - 1], lower_bits_not_zero);
-                    // chunk plus carry > 8
-                    let chunk_plus_carry_gt_8 = self.and(chunk[WINDOW_BITS - 1], carry);
-
-                    // chunk_gt_8 OR chunk_plus_carry_gt_8
-                    let gt_8 = self.mul(chunk_gt_8.target, chunk_plus_carry_gt_8.target);
-                    let gt_8 = self.mul_const(-GFp::ONE, gt_8);
-                    let gt_8 = BoolTarget::new_unsafe(self.add_many([
-                        gt_8,
-                        chunk_gt_8.target,
-                        chunk_plus_carry_gt_8.target,
-                    ]));
-
-                    carry = BoolTarget::new_unsafe(self.select(gt_8, one, zero));
-                    digits.push(self.select(gt_8, d_if_gt_8, d_if_lte_8));
-                    signs.push(gt_8);
-                }
-
-                let mut window = vec![a];
-                for _ in 0..((1 << (WINDOW_BITS - 1)) - 1) {
-                    let prev = window.last().unwrap();
-                    window.push(self.curve_add(*prev, a));
-                }
-
-                let mut q = self.curve_zero();
-                for (sign, magnitude) in signs.into_iter().zip(digits) {
-                    for _ in 0..WINDOW_BITS {
-                        q = self.curve_double(q);
+                let num_limbs = four_bit_limbs.len();
+                let mut res = self.curve_random_access(four_bit_limbs[num_limbs - 1], &window);
+                for limb in four_bit_limbs.into_iter().rev().skip(1) {
+                    for _ in 0..4 {
+                        res = self.curve_double(res);
                     }
 
-                    let CurveTarget(([x, mut y], is_inf)) =
-                        self.curve_random_access(magnitude, &window);
-                    let neg_y = self.neg_quintic_ext(y);
-                    y = self.select_quintic_ext(sign, neg_y, y);
-                    q = self.curve_add(q, CurveTarget(([x, y], is_inf)));
+                    let addend = self.curve_random_access(limb, &window);
+                    res = self.curve_add(res, addend);
                 }
 
-                q
+                res
             }
 
             // TODO: optimize to use base field when we know it's in the base field
