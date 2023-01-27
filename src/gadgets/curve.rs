@@ -1,16 +1,14 @@
 use crate::curve::scalar_field::Scalar;
-use crate::curve::{curve::AffinePointWithFlag, GFp, GFp5};
+use crate::curve::{curve::{Point, AffinePointWithFlag}, GFp, GFp5};
 use crate::gadgets::base_field::{CircuitBuilderGFp5, QuinticExtensionTarget};
 use num::{BigUint, FromPrimitive, Zero};
-use plonky2::field::extension::FieldExtension;
-use plonky2::field::types::{Field, Field64};
+use plonky2::field::types::Field; 
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::BoolTarget;
 use plonky2::iop::target::Target;
 use plonky2::iop::witness::Witness;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2_ecdsa::gadgets::biguint::CircuitBuilderBiguint;
-use plonky2_ecdsa::gadgets::nonnative::{CircuitBuilderNonNative, NonNativeTarget};
+use plonky2_ecdsa::gadgets::nonnative::NonNativeTarget;
 use plonky2_ecdsa::gadgets::split_nonnative::CircuitBuilderSplit;
 use plonky2_field::extension::Extendable;
 use plonky2_field::extension::quintic::QuinticExtension;
@@ -30,7 +28,7 @@ pub fn scalar_field_order() -> BigUint {
             .into_iter()
             .rev()
             .enumerate()
-            .fold(BigUint::zero(), |acc, (i, limb)| {
+            .fold(BigUint::zero(), |acc, (_, limb)| {
                 (BigUint::from_u64(100_000_000).unwrap() * acc) + BigUint::from_i32(limb).unwrap()
             });
     res * big_factor
@@ -210,6 +208,7 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 multiples
             }
 
+            // TODO optimize
             fn curve_scalar_mul(
                 &mut self,
                 a: CurveTarget,
@@ -247,15 +246,8 @@ macro_rules! impl_circuit_builder_for_extension_degree {
             fn curve_decode_from_quintic_ext(&mut self, w: QuinticExtensionTarget) -> CurveTarget {
                 let one = self.one();
                 let zero_quintic_ext = self.zero_quintic_ext();
-                let a = self.constant_quintic_ext(GFp5::TWO);
-                let b = self.constant_quintic_ext(GFp5::from_basefield_array([
-                    GFp::ZERO,
-                    GFp::from_canonical_u32(263),
-                    GFp::ZERO,
-                    GFp::ZERO,
-                    GFp::ZERO,
-                ]));
-                let bmul4 = self.mul_const_quintic_ext(GFp5::from_canonical_u32(4), b);
+                let a = self.constant_quintic_ext(Point::A);
+                let bmul4 = self.constant_quintic_ext(Point::B_MUL4);
 
                 let mut e = self.square_quintic_ext(w);
                 e = self.sub_quintic_ext(e, a);
@@ -263,7 +255,13 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 let mut delta = self.square_quintic_ext(e);
                 delta = self.sub_quintic_ext(delta, bmul4);
 
-                let (r, is_sqrt) = self.try_canonical_sqrt_quintic_ext(delta);
+                let (r, delta_is_sqrt) = self.try_any_sqrt_quintic_ext(delta);
+
+                // if delta is not a sqrt, then w must be zero. otherwise, it's not a valid point encoding
+                // we check this by asserting that delta_is_sqrt OR w == 0.
+                let w_is_zero = self.is_equal_quintic_ext(w, zero_quintic_ext);
+                let delta_is_sqrt_or_w_is_zero = self.or(delta_is_sqrt, w_is_zero);
+                self.assert_bool(delta_is_sqrt_or_w_is_zero);
 
                 let mut x1 = self.add_quintic_ext(e, r);
                 x1 = self.div_const_quintic_ext(x1, GFp5::TWO);
@@ -273,19 +271,15 @@ macro_rules! impl_circuit_builder_for_extension_degree {
 
                 let legendre_x1 = self.legendre_sym_quintic_ext(x1);
                 let legendre_is_one = self.is_equal(legendre_x1, one);
-                let x = self.select_quintic_ext(legendre_is_one, x2, x1);
+                let x = self.select_quintic_ext(legendre_is_one, x1, x2);
 
                 let negw = self.neg_quintic_ext(w);
                 let y = self.mul_quintic_ext(negw, x);
 
-                // is infinity if w is zero or delta is not a square
-                let w_is_zero = self.is_equal_quintic_ext(w, zero_quintic_ext);
-                let both = self.mul(w_is_zero.target, is_sqrt.target);
-                let mut is_inf = self.add(w_is_zero.target, is_sqrt.target);
-                is_inf = self.sub(is_inf, both);
-
-                let x = self.add_const_quintic_ext(x, GFp5::TWO / GFp5::from_canonical_u16(3));
-                CurveTarget(([x, y], BoolTarget::new_unsafe(is_inf)))
+                let x = self.add_const_quintic_ext(x, Point::A / GFp5::from_canonical_u16(3));
+                // since we checked above that w is zero if delta is not a sqrt, we can just set is_inf to delta_is_not_sqrt
+                let is_inf = self.not(delta_is_sqrt);
+                CurveTarget(([x, y], is_inf))
             }
         }
     };
@@ -347,7 +341,8 @@ impl<W: PartialWitnessQuinticExt<GFp>> PartialWitnessCurve<GFp> for W {
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-    use plonky2::{field::types::{Field, Sample}, plonk::{config::{PoseidonGoldilocksConfig, GenericConfig}, circuit_data::CircuitConfig}, iop::witness::PartialWitness};
+    use plonky2::{field::types::Sample, plonk::{config::{PoseidonGoldilocksConfig, GenericConfig}, circuit_data::CircuitConfig}, iop::witness::PartialWitness};
+    use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
     use rand::{thread_rng, Rng};
 
     use crate::curve::curve::Point;
@@ -440,6 +435,60 @@ mod tests {
 
         let mut pw = PartialWitness::new();
         pw.set_curve_target(prod, prod_expected.to_affine_with_flag());
+
+        let proof = circuit.prove(pw)?;
+        circuit.verify(proof)
+    }
+
+    #[test]
+    fn test_curve_encode() -> Result<()> {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        let mut rng = thread_rng();
+
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+
+        let p = random_point(&mut rng);
+        let w_expected = p.encode();
+        
+        let p = builder.curve_constant(p.to_affine_with_flag());
+        let w = builder.curve_encode_to_quintic_ext(p);
+        builder.register_quintic_ext_public_input(w);
+
+        let circuit = builder.build::<C>();
+
+        let mut pw = PartialWitness::new();
+        pw.set_quintic_ext_target(w, w_expected);
+
+        let proof = circuit.prove(pw)?;
+        circuit.verify(proof)
+    }
+
+    #[test]
+    fn test_curve_decode() -> Result<()> {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        let mut rng = thread_rng();
+
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+
+        let p_expected = random_point(&mut rng);
+        let w = p_expected.encode();
+
+        let w = builder.constant_quintic_ext(w);
+        let p = builder.curve_decode_from_quintic_ext(w);
+        builder.register_curve_public_input(p);
+
+        let circuit = builder.build::<C>();
+
+        let mut pw = PartialWitness::new();
+        pw.set_curve_target(p, p_expected.to_affine_with_flag());
 
         let proof = circuit.prove(pw)?;
         circuit.verify(proof)

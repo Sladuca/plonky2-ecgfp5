@@ -131,10 +131,10 @@ impl Eq for AffinePointWithFlag {}
 
 impl Point {
     // Curve equation 'a' constant.
-    const A: GFp5 = QuinticExtension([GFp::TWO, GFp::ZERO, GFp::ZERO, GFp::ZERO, GFp::ZERO]);
-    const B1: u64 = 263;
+    pub(crate) const A: GFp5 = QuinticExtension([GFp::TWO, GFp::ZERO, GFp::ZERO, GFp::ZERO, GFp::ZERO]);
+    pub const B1: u64 = 263;
 
-    const B: GFp5 = QuinticExtension([
+    pub(crate) const B: GFp5 = QuinticExtension([
         GFp::ZERO,
         GoldilocksField(Self::B1),
         GFp::ZERO,
@@ -143,7 +143,7 @@ impl Point {
     ]);
 
     // 2*b
-    const B_MUL2: GFp5 = QuinticExtension([
+    pub(crate) const B_MUL2: GFp5 = QuinticExtension([
         GFp::ZERO,
         GoldilocksField(2 * Self::B1),
         GFp::ZERO,
@@ -151,7 +151,7 @@ impl Point {
         GFp::ZERO,
     ]);
     // 4*b
-    const B_MUL4: GFp5 = QuinticExtension([
+    pub(crate) const B_MUL4: GFp5 = QuinticExtension([
         GFp::ZERO,
         GoldilocksField(4 * Self::B1),
         GFp::ZERO,
@@ -159,7 +159,7 @@ impl Point {
         GFp::ZERO,
     ]);
     // 16*b
-    const B_MUL16: GFp5 = QuinticExtension([
+    pub(crate) const B_MUL16: GFp5 = QuinticExtension([
         GFp::ZERO,
         GoldilocksField(16 * Self::B1),
         GFp::ZERO,
