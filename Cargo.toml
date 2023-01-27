@@ -17,3 +17,8 @@ rand = { version = "0.8.5", default-features = false, features = ["getrandom"] }
 [dev-dependencies]
 rand = { version = "0.8.5", features = ["min_const_gen"] }
 anyhow = "1.0.51"
+criterion = "0.4"
+
+[[bench]]
+name = "scalar"
+harness = false
