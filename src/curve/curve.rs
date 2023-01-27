@@ -71,18 +71,19 @@ impl AffinePointWithFlag {
 
     pub const GENERATOR: Self = Self {
         x: QuinticExtension([
-            GoldilocksField(12883135586176881569),
-            GoldilocksField(4356519642755055268),
-            GoldilocksField(5248930565894896907),
-            GoldilocksField(2165973894480315022),
-            GoldilocksField(2448410071095648785),
+            GoldilocksField(11712523173042564207),
+            GoldilocksField(14090224426659529053),
+            GoldilocksField(13197813503519687414),
+            GoldilocksField(16280770174934269299),
+            GoldilocksField(15998333998318935536),
         ]),
+
         y: QuinticExtension([
-            GoldilocksField(13835058052060938241),
-            GFp::ZERO,
-            GFp::ZERO,
-            GFp::ZERO,
-            GFp::ZERO,
+            GoldilocksField(14639054205878357578),
+            GoldilocksField(17426078571020221072),
+            GoldilocksField(2548978194165003307),
+            GoldilocksField(8663895577921260088),
+            GoldilocksField(9793640284382595140),
         ]),
         is_inf: false,
     };
@@ -1463,7 +1464,7 @@ mod tests {
     }
 
     #[test]
-    fn test_decode_weierstrass() {
+    fn test_decode_() {
         let [w0, w1, w2, w3, w4, w5, w6, w7] = test_vectors();
 
         let p0_expected = AffinePointWithFlag {
@@ -1620,6 +1621,10 @@ mod tests {
         };
         let p7 = AffinePointWithFlag::decode(w7).expect("w7 should successfully decode");
         assert_eq!(p7, p7_expected);
+
+        let w_gen = GFp5::from_canonical_u16(4);
+        let g = AffinePointWithFlag::decode(w_gen).expect("w_gen should successfully decode");
+        assert_eq!(g, AffinePointWithFlag::GENERATOR);
     }
 
     #[test]
