@@ -142,21 +142,23 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 let CurveTarget(([x1, y1], a_is_inf)) = a;
                 let CurveTarget(([x2, y2], b_is_inf)) = b;
 
-                let sx = self.is_equal_quintic_ext(x1, x2);
+                // note: paper has a typo. sx == 1 when x1 != x2, not when x1 == x2
+                let mut sx = self.is_equal_quintic_ext(x1, x2);
+                sx = self.not(sx);
+
                 let sy = self.is_equal_quintic_ext(y1, y2);
 
-                let lambda_0_if_sx_0 = self.sub_quintic_ext(y2, y1);
-                let mut lambda_0_if_sx_1 = self.square_quintic_ext(x1);
-                lambda_0_if_sx_1 = self.mul_const_quintic_ext(THREE, lambda_0_if_sx_1);
-                lambda_0_if_sx_1 =
-                    self.add_const_quintic_ext(lambda_0_if_sx_1, AffinePointWithFlag::A);
+                let lambda_0_if_sx_1 = self.sub_quintic_ext(y2, y1);
+                let mut lambda_0_if_sx_0 = self.square_quintic_ext(x1);
+                lambda_0_if_sx_0 = self.mul_const_quintic_ext(THREE, lambda_0_if_sx_0);
+                lambda_0_if_sx_0 =
+                    self.add_const_quintic_ext(lambda_0_if_sx_0, AffinePointWithFlag::A);
 
-                let lambda_1_if_sx_0 = self.sub_quintic_ext(x2, x1);
-                let lambda_1_if_sx_1 = self.mul_const_quintic_ext(GFp5::TWO, y1);
+                let lambda_1_if_sx_1 = self.sub_quintic_ext(x2, x1);
+                let lambda_1_if_sx_0 = self.mul_const_quintic_ext(GFp5::TWO, y1);
 
-                // note: paper has a typo. select opposite what the paper says
-                let lambda_0 = self.select_quintic_ext(sx, lambda_0_if_sx_0, lambda_0_if_sx_1);
-                let lambda_1 = self.select_quintic_ext(sy, lambda_1_if_sx_0, lambda_1_if_sx_1);
+                let lambda_0 = self.select_quintic_ext(sx, lambda_0_if_sx_1, lambda_0_if_sx_0);
+                let lambda_1 = self.select_quintic_ext(sx, lambda_1_if_sx_1, lambda_1_if_sx_0);
                 let lambda = self.div_quintic_ext(lambda_0, lambda_1);
 
                 let mut x3 = self.square_quintic_ext(lambda);
