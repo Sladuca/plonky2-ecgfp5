@@ -8,7 +8,8 @@ use alloc::vec::Vec;
 use plonky2_field::extension::quintic::QuinticExtension;
 use plonky2_field::goldilocks_field::GoldilocksField;
 use plonky2_field::ops::Square;
-use plonky2_field::types::Field;
+use plonky2_field::types::{Field, Sample};
+use rand::RngCore;
 
 use crate::curve::base_field::{Legendre, SquareRoot};
 use crate::curve::mul_table::*;
@@ -128,6 +129,15 @@ impl PartialEq for AffinePointWithFlag {
 }
 
 impl Eq for AffinePointWithFlag {}
+
+impl Sample for Point {
+    fn sample<R>(rng: &mut R) -> Self
+        where
+            R: RngCore + ?Sized {
+        let s = Scalar::sample(rng);
+        Point::GENERATOR * s
+    }
+}
 
 impl Point {
     // Curve equation 'a' constant.
