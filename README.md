@@ -1,7 +1,8 @@
 # plonky2-ecgfp5
 
-> DISCLAIMER: this is a prototype. It hasn't been audited. It hasn't even been looked at by that many people. DO NOT USE THIS IN PRODUCTION. There are probbaly bugs
-> DISCLAIMER: this crate is not (yet) constant time. 
+> DISCLAIMER: this is a prototype. It hasn't been audited. It probably has bugs. DO NOT USE THIS IN PRODUCTION.
+
+> NOTE: this crate is not (yet) constant time. 
 
 This crate provides plonky2 SNARK gadgets and an out-of-circuit implementation of `EcGFp5`, an elliptic curve whose base field is a degree-5 extension field of Goldilocks, the field whose modulus is `2^64 - 2^32 + 1`. 
 
