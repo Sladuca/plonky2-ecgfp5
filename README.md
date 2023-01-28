@@ -2,11 +2,13 @@
 
 > DISCLAIMER: this is a prototype. It hasn't been audited. It probably has bugs. DO NOT USE THIS IN PRODUCTION.
 
+> DISCLAIMER: the curve is pretty new, and, being built upon an extension field, may be vulnerable to more kinds of attacks than other curves. Read Thomas Pornin's paper on eprint for more information about security of the curve itself.
+
 > NOTE: this crate is not (yet) constant time. 
 
 This crate provides plonky2 SNARK gadgets and an out-of-circuit implementation of `EcGFp5`, an elliptic curve whose base field is a degree-5 extension field of Goldilocks, the field whose modulus is `2^64 - 2^32 + 1`. 
 
-Most of the out-of-circuit implementation is built atop Thomas Pornin's implementation, which can be found [here](https://github.com/pornin/ecgfp5). All credit for discovering the curve and providing its first implementation belongs to him.
+Most of the out-of-circuit implementation is built atop Thomas Pornin's implementation, which can be found [here](https://github.com/pornin/ecgfp5). All credit for designing the curve and providing its first implementation belongs to him.
 
 
 ### Why does this exist?
