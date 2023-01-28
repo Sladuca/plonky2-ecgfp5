@@ -1638,7 +1638,7 @@ mod tests {
     }
 
     #[test]
-    fn ecgfp5_mulgen() {
+    fn test_mulgen() {
         let mut rng = thread_rng();
         for _ in 0..20 {
             let mut ebuf = [0u8; 48];
@@ -1653,7 +1653,7 @@ mod tests {
     }
 
     #[test]
-    fn ecgfp5_verify_muladd() {
+    fn test_verify_muladd() {
         let mut rng = thread_rng();
         for _ in 0..20 {
             let mut ebuf = [0u8; 48];

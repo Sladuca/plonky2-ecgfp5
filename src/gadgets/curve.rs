@@ -62,6 +62,8 @@ pub trait CircuitBuilderEcGFp5 {
 
     fn curve_encode_to_quintic_ext(&mut self, a: CurveTarget) -> QuinticExtensionTarget;
     fn curve_decode_from_quintic_ext(&mut self, w: QuinticExtensionTarget) -> CurveTarget;
+
+    // TODO: verify_muladd
 }
 
 macro_rules! impl_circuit_builder_for_extension_degree {

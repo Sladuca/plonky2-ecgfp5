@@ -1,3 +1,13 @@
 # plonky2-ecgfp5
 
-TODO
+> DISCLAIMER: this is a prototype. It hasn't been audited. It hasn't even been looked at by that many people. DO NOT USE THIS IN PRODUCTION. There are probbaly bugs
+> DISCLAIMER: this crate is not (yet) constant time. 
+
+This crate provides plonky2 SNARK gadgets and an out-of-circuit implementation of `EcGFp5`, an elliptic curve whose base field is a degree-5 extension field of Goldilocks, the field whose modulus is `2^64 - 2^32 + 1`. 
+
+Most of the out-of-circuit implementation is built atop Thomas Pornin's implementation, which can be found [here](https://github.com/pornin/ecgfp5). All credit for discovering the curve and providing its first implementation belongs to him.
+
+
+### Why does this exist?
+
+One of the most useful things to have access to in a proof system is a curve that can be represented in its native field, as it allows one to efficiently verify public key cryptography (signatures, assymetric encryption, etc). For proof systems implemented atop BLS12-381, we have JubJub, and for proof systems implemented atop BN128, we have Baby JubJub. Plonky2 has something similar - EcGFp5. The hope is this will allow people to do in plonky2 the things people typically do with Baby JubJub in Circom/Groth16.
