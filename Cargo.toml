@@ -22,3 +22,7 @@ criterion = "0.4"
 [[bench]]
 name = "scalar"
 harness = false
+
+[[bench]]
+name = "curve"
+harness = false

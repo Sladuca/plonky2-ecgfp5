@@ -4,15 +4,12 @@ use plonky2_field::{types::{Sample, Field}, ops::Square};
 
 pub fn bench_scalar(c: &mut Criterion) {
     c.bench_function(
-        "addition",
+        "add",
         |b| {
             b.iter_batched(
-                || Scalar::rand(),
-                |mut x| {
-                    for _ in 0..100 {
-                        x = x + x;
-                    }
-                    x 
+                || (Scalar::rand(), Scalar::rand()),
+                |(x, y)| {
+                    black_box(x + y)
                 },
                 BatchSize::SmallInput
             )
@@ -20,15 +17,12 @@ pub fn bench_scalar(c: &mut Criterion) {
     );
 
     c.bench_function(
-        "multiplication",
+        "mul",
         |b| {
             b.iter_batched(
-                || Scalar::rand(),
-                |mut x| {
-                    for _ in 0..100 {
-                        x = x * x;
-                    }
-                    x 
+                || (Scalar::rand(), Scalar::rand()),
+                |(x, y)| {
+                    black_box(x * y)
                 },
                 BatchSize::SmallInput
             )
@@ -40,11 +34,8 @@ pub fn bench_scalar(c: &mut Criterion) {
         |b| {
             b.iter_batched(
                 || Scalar::rand(),
-                |mut x| {
-                    for _ in 0..100 {
-                        x = x.square()
-                    }
-                    x 
+                |x| {
+                    black_box(x.square())
                 },
                 BatchSize::SmallInput
             )
@@ -57,9 +48,7 @@ pub fn bench_scalar(c: &mut Criterion) {
             b.iter_batched(
                 || Scalar::rand(),
                 |x| {
-                    for _ in 0..100 {
-                        x.try_inverse();
-                    }
+                    black_box(x.try_inverse());
                 },
                 BatchSize::SmallInput
             )
