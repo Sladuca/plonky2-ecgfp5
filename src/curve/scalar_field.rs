@@ -61,7 +61,7 @@ impl Sample for Scalar {
     #[inline]
     fn sample<R>(rng: &mut R) -> Self
     where
-        R: rand::RngCore + ?Sized,
+        R: RngCore + ?Sized,
     {
         use num::bigint::RandBigInt;
         Self::from_noncanonical_biguint(rng.gen_biguint_below(&Self::order()))
