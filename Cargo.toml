@@ -1,5 +1,5 @@
 [package]
-name = "plonky2-ecgfp5"
+name = "plonky2_ecgfp5"
 version = "0.1.0"
 edition = "2021"
 
