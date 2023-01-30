@@ -7,6 +7,7 @@ readme = "README.md"
 license = "MIT"
 repository = "https://github.com/Sladuca/plonky2_ecgfp5"
 categories = ["cryptography"]
+description = "plonky2 gadgets for EcGFp5 curve and base field arithmetic"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
