@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Sebastien La Duca <sladuca777@gmail.com>"]
 readme = "README.md"
+license = "MIT"
 repository = "https://github.com/Sladuca/plonky2_ecgfp5"
 categories = ["cryptography"]
 
