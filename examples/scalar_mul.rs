@@ -1,9 +1,9 @@
 use log::Level;
-use plonky2::{plonk::{config::{PoseidonGoldilocksConfig, GenericConfig}, circuit_data::{CircuitConfig, CircuitData}, circuit_builder::CircuitBuilder, prover::prove}, iop::witness::PartialWitness, util::timing::{self, TimingTree}};
+use plonky2::{plonk::{config::{PoseidonGoldilocksConfig, GenericConfig}, circuit_data::{CircuitConfig, CircuitData}, circuit_builder::CircuitBuilder, prover::prove}, iop::witness::PartialWitness, util::timing::TimingTree};
 use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
 use plonky2_ecgfp5::{curve::{scalar_field::Scalar, curve::Point}, gadgets::curve::{CircuitBuilderEcGFp5, PartialWitnessCurve}};
 use plonky2_field::types::Sample;
-use rand::{thread_rng, Rng};
+use rand::thread_rng;
 use env_logger::{try_init_from_env, Env, DEFAULT_FILTER_ENV};
 
 
