@@ -15,14 +15,17 @@ pub fn main() {
 	init_logger();
 	let mut rng = thread_rng();
 
-	let config = CircuitConfig::standard_recursion_zk_config();
+	// scalar mul
+	println!("testing_scalar_mul...");
+
+	let config = CircuitConfig::standard_recursion_config();
 	let mut builder = CircuitBuilder::<F, D>::new(config);
 
-	let p = random_point(&mut rng);
+	let p = Point::sample(&mut rng);
 	let s = Scalar::sample(&mut rng);
 	let prod_expected = p * s;
 
-	let p = builder.curve_constant(p.to_affine_with_flag());
+	let p = builder.curve_constant(p.to_weierstrass());
 	let s = builder.constant_nonnative(s);
 
 	let prod = builder.curve_scalar_mul(p, s);
@@ -32,7 +35,37 @@ pub fn main() {
 	let circuit = builder.build::<C>();
 
 	let mut pw = PartialWitness::new();
-	pw.set_curve_target(prod, prod_expected.to_affine_with_flag());
+	pw.set_curve_target(prod, prod_expected.to_weierstrass());
+
+	let CircuitData { prover_only, common, verifier_only: _ } = &circuit;
+
+	let mut timing =  TimingTree::new("prove", Level::Debug);
+	let proof = prove(prover_only, common, pw, &mut timing).expect("prover failed");
+	timing.print();
+
+	circuit.verify(proof).expect("verifier failed");
+
+
+	// scalar mul const
+	println!("testing scalar_mul_const...");
+
+	let config = CircuitConfig::standard_recursion_config();
+	let mut builder = CircuitBuilder::<F, D>::new(config);
+
+	let p = Point::sample(&mut rng);
+	let s = Scalar::sample(&mut rng);
+	let prod_expected = p * s;
+
+	let s = builder.constant_nonnative(s);
+
+	let prod = builder.curve_scalar_mul_const(p, s);
+	builder.register_curve_public_input(prod);
+	
+	builder.print_gate_counts(0);
+	let circuit = builder.build::<C>();
+
+	let mut pw = PartialWitness::new();
+	pw.set_curve_target(prod, prod_expected.to_weierstrass());
 
 	let CircuitData { prover_only, common, verifier_only: _ } = &circuit;
 
@@ -45,9 +78,4 @@ pub fn main() {
 
 fn init_logger() {
 	let _ = try_init_from_env(Env::default().filter_or(DEFAULT_FILTER_ENV, "debug"));
-}
-
-fn random_point<R: Rng>(rng: &mut R) -> Point {
-	let scalar = Scalar::sample(rng);
-	Point::GENERATOR * scalar
 }

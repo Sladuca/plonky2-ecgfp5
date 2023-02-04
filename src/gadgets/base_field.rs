@@ -88,7 +88,13 @@ pub trait CircuitBuilderGFp5<F: RichField + Extendable<5>> {
         a: QuinticExtensionTarget,
         c: GFp5,
     ) -> QuinticExtensionTarget;
+    fn div_or_zero_quintic_ext(
+        &mut self,
+        a: QuinticExtensionTarget,
+        b: QuinticExtensionTarget,
+    ) -> QuinticExtensionTarget;
     fn inverse_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget;
+
     fn any_sqrt_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget;
     fn try_any_sqrt_quintic_ext(
         &mut self,
@@ -418,8 +424,21 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 self.mul_quintic_ext(c, a)
             }
 
-            /// returns `a / b` is `b` is nonzero, `0` otherwise
             fn div_quintic_ext(
+                &mut self,
+                a: QuinticExtensionTarget,
+                b: QuinticExtensionTarget,
+            ) -> QuinticExtensionTarget {
+                let quotient = self.add_virtual_quintic_ext_target();
+                self.add_simple_generator(QuinticQuotientGenerator::new(a, b, quotient));
+
+                let quotient_times_denominator = self.mul_quintic_ext(quotient, b);
+                self.connect_quintic_ext(quotient_times_denominator, a);
+
+                quotient
+            }
+
+            fn div_or_zero_quintic_ext(
                 &mut self,
                 a: QuinticExtensionTarget,
                 b: QuinticExtensionTarget,
@@ -441,7 +460,6 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 quotient
             }
 
-            /// returns `a / b` is `b` is nonzero, `0` otherwise
             fn div_const_quintic_ext(
                 &mut self,
                 num: QuinticExtensionTarget,

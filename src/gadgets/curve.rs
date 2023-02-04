@@ -165,7 +165,7 @@ macro_rules! impl_circuit_builder_for_extension_degree {
 
                 let lambda_0 = self.select_quintic_ext(x_same, lambda_0_if_x_same, lambda_0_if_x_not_same);
                 let lambda_1 = self.select_quintic_ext(x_same, lambda_1_if_x_same, lambda_1_if_x_not_same);
-                let lambda = self.div_quintic_ext(lambda_0, lambda_1);
+                let lambda = self.div_or_zero_quintic_ext(lambda_0, lambda_1);
 
                 let mut x3 = self.square_quintic_ext(lambda);
                 x3 = self.sub_quintic_ext(x3, x1);
@@ -190,7 +190,7 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 lambda_0 = self.add_const_quintic_ext(lambda_0, WeierstrassPoint::A);
                 let lambda_1 = self.mul_const_quintic_ext(GFp5::TWO, y);
 
-                let lambda = self.div_quintic_ext(lambda_0, lambda_1);
+                let lambda = self.div_or_zero_quintic_ext(lambda_0, lambda_1);
 
                 let mut x2 = self.square_quintic_ext(lambda);
                 let two_x = self.mul_const_quintic_ext(GFp5::TWO, x);
@@ -273,7 +273,7 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 let CurveTarget(([x, y], is_inf)) = a;
                 let adiv3 = self.constant_quintic_ext(GFp5::TWO / GFp5::from_canonical_u16(3));
                 let denom = self.sub_quintic_ext(adiv3, x);
-                let w = self.div_quintic_ext(y, denom);
+                let w = self.div_or_zero_quintic_ext(y, denom);
 
                 let zero = self.zero_quintic_ext();
                 self.select_quintic_ext(is_inf, zero, w)
@@ -454,9 +454,7 @@ mod tests {
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
         let p = Point::sample(&mut rng);
-        println!("point: {:?}", p.to_weierstrass());
         let s = Scalar::sample(&mut rng);
-        println!("s: {}", s);
         let prod_expected = p * s;
 
         let p = builder.curve_constant(p.to_weierstrass());
@@ -486,9 +484,7 @@ mod tests {
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
         let p = Point::sample(&mut rng);
-        println!("point: {:?}", p.to_weierstrass());
         let s = Scalar::sample(&mut rng);
-        println!("s: {}", s);
         let prod_expected = p * s;
 
         let s = builder.constant_nonnative(s);
@@ -544,7 +540,6 @@ mod tests {
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
         let p_expected = Point::sample(&mut rng);
-        println!("point: {:?}", p_expected.to_weierstrass());
         let w = p_expected.encode();
 
         let w = builder.constant_quintic_ext(w);
@@ -554,8 +549,7 @@ mod tests {
         let circuit = builder.build::<C>();
 
         let mut pw = PartialWitness::new();
-        let p_expected = p_expected.to_weierstrass();
-        pw.set_curve_target(p, p_expected);
+        pw.set_curve_target(p, p_expected.to_weierstrass());
 
         let proof = circuit.prove(pw)?;
         circuit.verify(proof)
