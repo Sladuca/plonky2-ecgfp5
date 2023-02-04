@@ -424,11 +424,15 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 a: QuinticExtensionTarget,
                 b: QuinticExtensionTarget,
             ) -> QuinticExtensionTarget {
+                let zero = self.zero_quintic_ext();
                 let quotient = self.add_virtual_quintic_ext_target();
                 self.add_simple_generator(QuinticQuotientGenerator::new(a, b, quotient));
 
                 let quotient_times_denominator = self.mul_quintic_ext(quotient, b);
-                self.connect_quintic_ext(quotient_times_denominator, a);
+                let is_zero = self.is_equal_quintic_ext(quotient_times_denominator, zero);
+                let quotient_check = self.is_equal_quintic_ext(quotient_times_denominator, a);
+                let is_valid = self.and(is_zero, quotient_check);
+                self.assert_bool(is_valid);
 
                 quotient
             }

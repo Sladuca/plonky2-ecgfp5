@@ -40,13 +40,13 @@ pub(crate) struct AffinePoint {
 
 /// A curve point in short Weirstrass form (x, y). This is used by the in-circuit representation
 #[derive(Clone, Copy, Debug)]
-pub struct AffinePointWithFlag {
+pub struct WeierstrassPoint {
     pub(crate) x: GFp5,
     pub(crate) y: GFp5,
     pub(crate) is_inf: bool,
 }
 
-impl AffinePointWithFlag {
+impl WeierstrassPoint {
     // curve equation `A` constants when in short Weierstrass form
     pub const A: GFp5 = QuinticExtension([
         GoldilocksField(6148914689804861439),
@@ -89,10 +89,14 @@ impl AffinePointWithFlag {
         is_inf: false,
     };
 
+    pub fn encode(&self) -> GFp5 {
+        self.y / (Point::A / GFp5::from_canonical_u16(3) - self.x)
+    }
+
     pub fn decode(w: GFp5) -> Option<Self> {
         let e = w.square() - Point::A;
         let delta = e.square() - Point::B_MUL4;
-        let r = delta.sqrt();
+        let r = delta.canonical_sqrt();
         let c = r.is_some();
         let r = r.unwrap_or(GFp5::ZERO);
 
@@ -111,14 +115,14 @@ impl AffinePointWithFlag {
 
         // If w == 0 then this is in fact a success.
         if c || w == GFp5::ZERO {
-            Some(AffinePointWithFlag { x, y, is_inf })
+            Some(WeierstrassPoint { x, y, is_inf })
         } else {
             None
         }
     }
 }
 
-impl PartialEq for AffinePointWithFlag {
+impl PartialEq for WeierstrassPoint {
     fn eq(&self, other: &Self) -> bool {
         if self.is_inf && other.is_inf {
             true
@@ -128,7 +132,7 @@ impl PartialEq for AffinePointWithFlag {
     }
 }
 
-impl Eq for AffinePointWithFlag {}
+impl Eq for WeierstrassPoint {}
 
 impl Sample for Point {
     fn sample<R>(rng: &mut R) -> Self
@@ -242,7 +246,7 @@ impl Point {
 
         let e = w.square() - Self::A;
         let delta = e.square() - Self::B_MUL4;
-        let r = delta.sqrt();
+        let r = delta.canonical_sqrt();
         let c = r.is_some();
         let r = r.unwrap_or(GFp5::ZERO);
 
@@ -267,9 +271,9 @@ impl Point {
     }
 
     // TODO: this can be better
-    pub fn to_affine_with_flag(&self) -> AffinePointWithFlag {
+    pub fn to_weierstrass(&self) -> WeierstrassPoint {
         let w = self.encode();
-        AffinePointWithFlag::decode(w).unwrap()
+        WeierstrassPoint::decode(w).unwrap()
     }
 
     // General point addition. formulas are complete (no special case).
@@ -1194,13 +1198,13 @@ impl Eq for Point {}
 #[cfg(test)]
 mod tests {
     use plonky2_field::{
-        extension::quintic::QuinticExtension, goldilocks_field::GoldilocksField, types::Field,
+        extension::quintic::QuinticExtension, goldilocks_field::GoldilocksField, types::{Field, Sample},
     };
     use rand::{thread_rng, Rng};
 
     use crate::curve::{base_field::InverseOrZero, scalar_field::Scalar, GFp5, GFp};
 
-    use super::{AffinePoint, Point, AffinePointWithFlag};
+    use super::{AffinePoint, Point, WeierstrassPoint};
 
     fn test_vectors() -> [GFp5; 8] {
         // P0 is neutral of G.
@@ -1474,10 +1478,10 @@ mod tests {
     }
 
     #[test]
-    fn test_decode_() {
+    fn test_decode() {
         let [w0, w1, w2, w3, w4, w5, w6, w7] = test_vectors();
 
-        let p0_expected = AffinePointWithFlag {
+        let p0_expected = WeierstrassPoint {
             x: QuinticExtension([
                 GoldilocksField(6148914689804861440),
                 GFp::ZERO,
@@ -1488,10 +1492,10 @@ mod tests {
             y: GFp5::ZERO,
             is_inf: true,
         };
-        let p0 = AffinePointWithFlag::decode(w0).expect("w0 should successfully decode");
+        let p0 = WeierstrassPoint::decode(w0).expect("w0 should successfully decode");
         assert_eq!(p0, p0_expected);
 
-        let p1_expected = AffinePointWithFlag {
+        let p1_expected = WeierstrassPoint {
             x: QuinticExtension([
                 GoldilocksField(7887569478949190020),
                 GoldilocksField(11586418388990522938),
@@ -1508,10 +1512,10 @@ mod tests {
             ]),
             is_inf: false,
         };
-        let p1 = AffinePointWithFlag::decode(w1).expect("w1 should successfully decode");
+        let p1 = WeierstrassPoint::decode(w1).expect("w1 should successfully decode");
         assert_eq!(p1, p1_expected);
 
-        let p2_expected = AffinePointWithFlag {
+        let p2_expected = WeierstrassPoint {
             x: QuinticExtension([
                 GoldilocksField(11231216549003316587),
                 GoldilocksField(17312878720767554617),
@@ -1528,10 +1532,10 @@ mod tests {
             ]),
             is_inf: false,
         };
-        let p2 = AffinePointWithFlag::decode(w2).expect("w2 should successfully decode");
+        let p2 = WeierstrassPoint::decode(w2).expect("w2 should successfully decode");
         assert_eq!(p2, p2_expected);
 
-        let p3_expected = AffinePointWithFlag {
+        let p3_expected = WeierstrassPoint {
             x: QuinticExtension([
                 GoldilocksField(567456832026211571),
                 GoldilocksField(6401615614732569674),
@@ -1548,10 +1552,10 @@ mod tests {
             ]),
             is_inf: false,
         };
-        let p3 = AffinePointWithFlag::decode(w3).expect("w3 should successfully decode");
+        let p3 = WeierstrassPoint::decode(w3).expect("w3 should successfully decode");
         assert_eq!(p3, p3_expected);
 
-        let p4_expected = AffinePointWithFlag {
+        let p4_expected = WeierstrassPoint {
             x: QuinticExtension([
                 GoldilocksField(2626390539619063455),
                 GoldilocksField(3069873143820007175),
@@ -1568,10 +1572,10 @@ mod tests {
             ]),
             is_inf: false,
         };
-        let p4 = AffinePointWithFlag::decode(w4).expect("w4 should successfully decode");
+        let p4 = WeierstrassPoint::decode(w4).expect("w4 should successfully decode");
         assert_eq!(p4, p4_expected);
 
-        let p5_expected = AffinePointWithFlag {
+        let p5_expected = WeierstrassPoint {
             x: QuinticExtension([
                 GoldilocksField(3378618241466923429),
                 GoldilocksField(1600085176765664645),
@@ -1588,11 +1592,11 @@ mod tests {
             ]),
             is_inf: false,
         };
-        let p5 = AffinePointWithFlag::decode(w5).expect("w5 should successfully decode");
+        let p5 = WeierstrassPoint::decode(w5).expect("w5 should successfully decode");
         assert_eq!(p5, p5_expected);
 
 
-        let p6_expected = AffinePointWithFlag {
+        let p6_expected = WeierstrassPoint {
             x: QuinticExtension([
                 GoldilocksField(12792842147978866906),
                 GoldilocksField(10605017725125541653),
@@ -1609,10 +1613,10 @@ mod tests {
             ]),
             is_inf: false,
         };
-        let p6 = AffinePointWithFlag::decode(w6).expect("w6 should successfully decode");
+        let p6 = WeierstrassPoint::decode(w6).expect("w6 should successfully decode");
         assert_eq!(p6, p6_expected);
 
-        let p7_expected = AffinePointWithFlag {
+        let p7_expected = WeierstrassPoint {
             x: QuinticExtension([
                 GoldilocksField(10440794216646581227),
                 GoldilocksField(13992847258701590930),
@@ -1629,12 +1633,30 @@ mod tests {
             ]),
             is_inf: false,
         };
-        let p7 = AffinePointWithFlag::decode(w7).expect("w7 should successfully decode");
+        let p7 = WeierstrassPoint::decode(w7).expect("w7 should successfully decode");
         assert_eq!(p7, p7_expected);
 
         let w_gen = GFp5::from_canonical_u16(4);
-        let g = AffinePointWithFlag::decode(w_gen).expect("w_gen should successfully decode");
-        assert_eq!(g, AffinePointWithFlag::GENERATOR);
+        let g = WeierstrassPoint::decode(w_gen).expect("w_gen should successfully decode");
+        assert_eq!(g, WeierstrassPoint::GENERATOR);
+    }
+
+    #[test]
+    fn test_decode_random() {
+        let mut rng = thread_rng();
+        for _ in 0..30 {
+            let point = Point::sample(&mut rng);
+            let encoded = point.encode();
+            let decoded = Point::decode(encoded).expect("decoding should succeed");
+            assert_eq!(point, decoded);
+
+            let encoded = point.to_weierstrass().encode();
+            let decoded = WeierstrassPoint::decode(encoded).expect("decoding should succeed");
+            assert_eq!(point.to_weierstrass(), decoded);
+
+            let decoded = Point::decode(encoded).expect("decoding should succeed");
+            assert_eq!(point, decoded);
+        }
     }
 
     #[test]

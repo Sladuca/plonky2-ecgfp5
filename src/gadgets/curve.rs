@@ -1,7 +1,6 @@
 use crate::curve::scalar_field::Scalar;
-use crate::curve::{curve::{Point, AffinePointWithFlag}, GFp, GFp5};
+use crate::curve::{curve::{Point, WeierstrassPoint}, GFp, GFp5};
 use crate::gadgets::base_field::{CircuitBuilderGFp5, QuinticExtensionTarget};
-use num::{BigUint, FromPrimitive, Zero};
 use plonky2::field::types::Field; 
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::BoolTarget;
@@ -15,24 +14,6 @@ use plonky2_field::extension::quintic::QuinticExtension;
 use plonky2_field::goldilocks_field::GoldilocksField;
 
 use super::base_field::PartialWitnessQuinticExt;
-
-pub fn scalar_field_order() -> BigUint {
-    let mut res = BigUint::from_u128(25 * 5 * 163 * 769 * 1059871).unwrap();
-    res *= BigUint::from_u128(253243826720162431254857814100127).unwrap();
-
-    let big_factor_limbs = [
-        198400523, 053184002, 814403536, 918162724, 916343842, 520561,
-    ];
-    let big_factor =
-        big_factor_limbs
-            .into_iter()
-            .rev()
-            .enumerate()
-            .fold(BigUint::zero(), |acc, (_, limb)| {
-                (BigUint::from_u64(100_000_000).unwrap() * acc) + BigUint::from_i32(limb).unwrap()
-            });
-    res * big_factor
-}
 
 const THREE: GFp5 = QuinticExtension([
     GoldilocksField(3),
@@ -49,16 +30,22 @@ pub struct CurveTarget(([QuinticExtensionTarget; 2], BoolTarget));
 pub trait CircuitBuilderEcGFp5 {
     fn add_virtual_curve_target(&mut self) -> CurveTarget;
     fn register_curve_public_input(&mut self, point: CurveTarget);
-    fn curve_constant(&mut self, point: AffinePointWithFlag) -> CurveTarget;
+    fn curve_constant(&mut self, point: WeierstrassPoint) -> CurveTarget;
     fn curve_zero(&mut self) -> CurveTarget;
     fn curve_generator(&mut self) -> CurveTarget;
+
+    fn curve_eq(&mut self, a: CurveTarget, b: CurveTarget) -> BoolTarget;
     fn curve_select(&mut self, cond: BoolTarget, a: CurveTarget, b: CurveTarget) -> CurveTarget;
     fn curve_random_access(&mut self, access_index: Target, v: &[CurveTarget]) -> CurveTarget;
 
     fn curve_add(&mut self, a: CurveTarget, b: CurveTarget) -> CurveTarget;
     fn curve_double(&mut self, a: CurveTarget) -> CurveTarget;
+
     fn precompute_window(&mut self, a: CurveTarget, window_bits: usize) -> Vec<CurveTarget>;
     fn curve_scalar_mul(&mut self, a: CurveTarget, scalar: NonNativeTarget<Scalar>) -> CurveTarget;
+
+    fn precompute_window_const(&mut self, point: Point, window_bits: usize) -> Vec<CurveTarget>;
+    fn curve_scalar_mul_const(&mut self, point: Point, scalar: NonNativeTarget<Scalar>) -> CurveTarget;
 
     fn curve_encode_to_quintic_ext(&mut self, a: CurveTarget) -> QuinticExtensionTarget;
     fn curve_decode_from_quintic_ext(&mut self, w: QuinticExtensionTarget) -> CurveTarget;
@@ -83,8 +70,8 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 self.register_public_input(is_inf.target);
             }
 
-            fn curve_constant(&mut self, point: AffinePointWithFlag) -> CurveTarget {
-                let AffinePointWithFlag { x, y, is_inf } = point;
+            fn curve_constant(&mut self, point: WeierstrassPoint) -> CurveTarget {
+                let WeierstrassPoint { x, y, is_inf } = point;
 
                 let x = self.constant_quintic_ext(x);
                 let y = self.constant_quintic_ext(y);
@@ -93,11 +80,28 @@ macro_rules! impl_circuit_builder_for_extension_degree {
             }
 
             fn curve_zero(&mut self) -> CurveTarget {
-                self.curve_constant(AffinePointWithFlag::NEUTRAL)
+                self.curve_constant(WeierstrassPoint::NEUTRAL)
             }
 
             fn curve_generator(&mut self) -> CurveTarget {
-                self.curve_constant(AffinePointWithFlag::GENERATOR)
+                self.curve_constant(WeierstrassPoint::GENERATOR)
+            }
+
+            fn curve_eq(
+                &mut self,
+                a: CurveTarget,
+                b: CurveTarget,
+            ) -> BoolTarget {
+                let CurveTarget(([ax, ay], a_is_inf)) = a;
+                let CurveTarget(([bx, by], b_is_inf)) = b;
+
+                let both_inf = self.and(a_is_inf, b_is_inf);
+
+                let x_eq = self.is_equal_quintic_ext(ax, bx);
+                let y_eq = self.is_equal_quintic_ext(ay, by);
+                let both_eq = self.and(x_eq, y_eq);
+
+                self.or(both_inf, both_eq)
             }
 
             fn curve_select(
@@ -145,22 +149,22 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 let CurveTarget(([x2, y2], b_is_inf)) = b;
 
                 // note: paper has a typo. sx == 1 when x1 != x2, not when x1 == x2
-                let mut sx = self.is_equal_quintic_ext(x1, x2);
-                sx = self.not(sx);
+                let x_same = self.is_equal_quintic_ext(x1, x2);
+                let mut y_diff = self.is_equal_quintic_ext(y1, y2);
+                y_diff = self.not(y_diff);
 
-                let sy = self.is_equal_quintic_ext(y1, y2);
+                let lambda_0_if_x_not_same = self.sub_quintic_ext(y2, y1);
 
-                let lambda_0_if_sx_1 = self.sub_quintic_ext(y2, y1);
-                let mut lambda_0_if_sx_0 = self.square_quintic_ext(x1);
-                lambda_0_if_sx_0 = self.mul_const_quintic_ext(THREE, lambda_0_if_sx_0);
-                lambda_0_if_sx_0 =
-                    self.add_const_quintic_ext(lambda_0_if_sx_0, AffinePointWithFlag::A);
+                let mut lambda_0_if_x_same = self.square_quintic_ext(x1);
+                lambda_0_if_x_same = self.mul_const_quintic_ext(THREE, lambda_0_if_x_same);
+                lambda_0_if_x_same =
+                    self.add_const_quintic_ext(lambda_0_if_x_same, WeierstrassPoint::A);
 
-                let lambda_1_if_sx_1 = self.sub_quintic_ext(x2, x1);
-                let lambda_1_if_sx_0 = self.mul_const_quintic_ext(GFp5::TWO, y1);
+                let lambda_1_if_x_not_same = self.sub_quintic_ext(x2, x1);
+                let lambda_1_if_x_same = self.mul_const_quintic_ext(GFp5::TWO, y1);
 
-                let lambda_0 = self.select_quintic_ext(sx, lambda_0_if_sx_1, lambda_0_if_sx_0);
-                let lambda_1 = self.select_quintic_ext(sx, lambda_1_if_sx_1, lambda_1_if_sx_0);
+                let lambda_0 = self.select_quintic_ext(x_same, lambda_0_if_x_same, lambda_0_if_x_not_same);
+                let lambda_1 = self.select_quintic_ext(x_same, lambda_1_if_x_same, lambda_1_if_x_not_same);
                 let lambda = self.div_quintic_ext(lambda_0, lambda_1);
 
                 let mut x3 = self.square_quintic_ext(lambda);
@@ -171,7 +175,7 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 y3 = self.mul_quintic_ext(lambda, y3);
                 y3 = self.sub_quintic_ext(y3, y1);
 
-                let c_is_inf = self.and(sx, sy);
+                let c_is_inf = self.and(x_same, y_diff);
                 let c = CurveTarget(([x3, y3], c_is_inf));
 
                 let sel = self.curve_select(a_is_inf, b, c);
@@ -183,7 +187,7 @@ macro_rules! impl_circuit_builder_for_extension_degree {
 
                 let mut lambda_0 = self.square_quintic_ext(x);
                 lambda_0 = self.mul_const_quintic_ext(THREE, lambda_0);
-                lambda_0 = self.add_const_quintic_ext(lambda_0, AffinePointWithFlag::A);
+                lambda_0 = self.add_const_quintic_ext(lambda_0, WeierstrassPoint::A);
                 let lambda_1 = self.mul_const_quintic_ext(GFp5::TWO, y);
 
                 let lambda = self.div_quintic_ext(lambda_0, lambda_1);
@@ -217,6 +221,37 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 scalar: NonNativeTarget<Scalar>,
             ) -> CurveTarget {
                 let window = self.precompute_window(a, 4);
+                let four_bit_limbs = self.split_nonnative_to_4_bit_limbs(&scalar);
+
+                let num_limbs = four_bit_limbs.len();
+                let mut res = self.curve_random_access(four_bit_limbs[num_limbs - 1], &window);
+                for limb in four_bit_limbs.into_iter().rev().skip(1) {
+                    for _ in 0..4 {
+                        res = self.curve_double(res);
+                    }
+
+                    let addend = self.curve_random_access(limb, &window);
+                    res = self.curve_add(res, addend);
+                }
+
+                res
+            }
+
+
+            fn precompute_window_const(&mut self, point: Point, window_bits: usize) -> Vec<CurveTarget> {
+                let mut curr = point;
+                let mut multiples = vec![self.curve_zero()];
+
+                for _ in 1..(1 << window_bits) {
+                    multiples.push(self.curve_constant(curr.to_weierstrass()));
+                    curr += point;
+                }
+
+                multiples
+            }
+
+            fn curve_scalar_mul_const(&mut self, point: Point, scalar: NonNativeTarget<Scalar>, ) -> CurveTarget {
+                let window = self.precompute_window_const(point, 4);
                 let four_bit_limbs = self.split_nonnative_to_4_bit_limbs(&scalar);
 
                 let num_limbs = four_bit_limbs.len();
@@ -294,24 +329,24 @@ impl_circuit_builder_for_extension_degree!(5);
 
 
 pub trait PartialWitnessCurve<F: RichField + Extendable<5>>: Witness<F> {
-    fn get_curve_target(&self, target: CurveTarget) -> AffinePointWithFlag;
+    fn get_curve_target(&self, target: CurveTarget) -> WeierstrassPoint;
     fn get_curve_targets(
         &self,
         targets: &[CurveTarget],
-    ) -> Vec<AffinePointWithFlag> {
+    ) -> Vec<WeierstrassPoint> {
         targets.iter().map(|&t| self.get_curve_target(t)).collect()
     }
     
     fn set_curve_target(
         &mut self,
         target: CurveTarget,
-        value: AffinePointWithFlag,
+        value: WeierstrassPoint,
     );
 
     fn set_curve_targets(
         &mut self,
         targets: &[CurveTarget],
-        values: &[AffinePointWithFlag],
+        values: &[WeierstrassPoint],
     ) {
         for (&t, &v) in targets.iter().zip(values.iter()) {
             self.set_curve_target(t, v);
@@ -320,18 +355,18 @@ pub trait PartialWitnessCurve<F: RichField + Extendable<5>>: Witness<F> {
 }
 
 impl<W: PartialWitnessQuinticExt<GFp>> PartialWitnessCurve<GFp> for W {
-    fn get_curve_target(&self, target: CurveTarget) -> AffinePointWithFlag {
+    fn get_curve_target(&self, target: CurveTarget) -> WeierstrassPoint {
         let CurveTarget(([x, y], is_inf)) = target;
         let x = self.get_quintic_ext_target(x);
         let y = self.get_quintic_ext_target(y);
         let is_inf = self.get_bool_target(is_inf);
-        AffinePointWithFlag { x, y, is_inf }
+        WeierstrassPoint { x, y, is_inf }
     }
 
     fn set_curve_target(
         &mut self,
         target: CurveTarget,
-        value: AffinePointWithFlag,
+        value: WeierstrassPoint,
     ) {
         let CurveTarget(([x, y], is_inf)) = target;
         self.set_quintic_ext_target(x, value.x);
@@ -345,16 +380,11 @@ mod tests {
     use anyhow::Result;
     use plonky2::{field::types::Sample, plonk::{config::{PoseidonGoldilocksConfig, GenericConfig}, circuit_data::CircuitConfig}, iop::witness::PartialWitness};
     use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
-    use rand::{thread_rng, Rng};
+    use rand::thread_rng;
 
     use crate::curve::curve::Point;
 
     use super::*;
-
-    fn random_point<R: Rng>(rng: &mut R) -> Point {
-        let scalar = Scalar::sample(rng);
-        Point::GENERATOR * scalar
-    }
 
     #[test]
     fn test_curve_add() -> Result<()> {
@@ -367,19 +397,19 @@ mod tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
-        let p1 = random_point(&mut rng);
-        let p2 = random_point(&mut rng);
+        let p1 = Point::sample(&mut rng);
+        let p2 = Point::sample(&mut rng);
         let p3_expected = p1 + p2;
 
-        let p1 = builder.curve_constant(p1.to_affine_with_flag());
-        let p2 = builder.curve_constant(p2.to_affine_with_flag());
+        let p1 = builder.curve_constant(p1.to_weierstrass());
+        let p2 = builder.curve_constant(p2.to_weierstrass());
         let p3 = builder.curve_add(p1, p2);
         builder.register_curve_public_input(p3);
         
         let circuit = builder.build::<C>();
 
         let mut pw = PartialWitness::new();
-        pw.set_curve_target(p3, p3_expected.to_affine_with_flag());
+        pw.set_curve_target(p3, p3_expected.to_weierstrass());
 
         let proof = circuit.prove(pw)?;
         circuit.verify(proof)
@@ -396,17 +426,17 @@ mod tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
-        let p1 = random_point(&mut rng);
+        let p1 = Point::sample(&mut rng);
         let p2_expected = p1.double();
 
-        let p1 = builder.curve_constant(p1.to_affine_with_flag());
+        let p1 = builder.curve_constant(p1.to_weierstrass());
         let p2 = builder.curve_double(p1);
         builder.register_curve_public_input(p2);
         
         let circuit = builder.build::<C>();
 
         let mut pw = PartialWitness::new();
-        pw.set_curve_target(p2, p2_expected.to_affine_with_flag());
+        pw.set_curve_target(p2, p2_expected.to_weierstrass());
 
         let proof = circuit.prove(pw)?;
         circuit.verify(proof)
@@ -423,11 +453,13 @@ mod tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
-        let p = random_point(&mut rng);
+        let p = Point::sample(&mut rng);
+        println!("point: {:?}", p.to_weierstrass());
         let s = Scalar::sample(&mut rng);
+        println!("s: {}", s);
         let prod_expected = p * s;
 
-        let p = builder.curve_constant(p.to_affine_with_flag());
+        let p = builder.curve_constant(p.to_weierstrass());
         let s = builder.constant_nonnative(s);
 
         let prod = builder.curve_scalar_mul(p, s);
@@ -436,7 +468,38 @@ mod tests {
         let circuit = builder.build::<C>();
 
         let mut pw = PartialWitness::new();
-        pw.set_curve_target(prod, prod_expected.to_affine_with_flag());
+        pw.set_curve_target(prod, prod_expected.to_weierstrass());
+
+        let proof = circuit.prove(pw)?;
+        circuit.verify(proof)
+    }
+
+    #[test]
+    fn test_curve_scalar_mul_const() -> Result<()> {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        let mut rng = thread_rng();
+
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+
+        let p = Point::sample(&mut rng);
+        println!("point: {:?}", p.to_weierstrass());
+        let s = Scalar::sample(&mut rng);
+        println!("s: {}", s);
+        let prod_expected = p * s;
+
+        let s = builder.constant_nonnative(s);
+
+        let prod = builder.curve_scalar_mul_const(p, s);
+        builder.register_curve_public_input(prod);
+        
+        let circuit = builder.build::<C>();
+
+        let mut pw = PartialWitness::new();
+        pw.set_curve_target(prod, prod_expected.to_weierstrass());
 
         let proof = circuit.prove(pw)?;
         circuit.verify(proof)
@@ -453,10 +516,10 @@ mod tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
-        let p = random_point(&mut rng);
+        let p = Point::sample(&mut rng);
         let w_expected = p.encode();
         
-        let p = builder.curve_constant(p.to_affine_with_flag());
+        let p = builder.curve_constant(p.to_weierstrass());
         let w = builder.curve_encode_to_quintic_ext(p);
         builder.register_quintic_ext_public_input(w);
 
@@ -480,7 +543,8 @@ mod tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
-        let p_expected = random_point(&mut rng);
+        let p_expected = Point::sample(&mut rng);
+        println!("point: {:?}", p_expected.to_weierstrass());
         let w = p_expected.encode();
 
         let w = builder.constant_quintic_ext(w);
@@ -490,7 +554,8 @@ mod tests {
         let circuit = builder.build::<C>();
 
         let mut pw = PartialWitness::new();
-        pw.set_curve_target(p, p_expected.to_affine_with_flag());
+        let p_expected = p_expected.to_weierstrass();
+        pw.set_curve_target(p, p_expected);
 
         let proof = circuit.prove(pw)?;
         circuit.verify(proof)

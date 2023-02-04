@@ -148,6 +148,12 @@ mod tests {
 
             assert_eq!(legendre_sym, GFp::ONE);
         }
+
+        // test zero
+        let x = GFp5::ZERO;
+        let square = x * x;
+        let legendre_sym = square.legendre();
+        assert_eq!(legendre_sym, GFp::ZERO);
     }
 
     #[test]
