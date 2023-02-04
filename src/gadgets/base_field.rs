@@ -429,9 +429,13 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 self.add_simple_generator(QuinticQuotientGenerator::new(a, b, quotient));
 
                 let quotient_times_denominator = self.mul_quintic_ext(quotient, b);
-                let is_zero = self.is_equal_quintic_ext(quotient_times_denominator, zero);
                 let quotient_check = self.is_equal_quintic_ext(quotient_times_denominator, a);
-                let is_valid = self.and(is_zero, quotient_check);
+                
+                let b_is_zero = self.is_equal_quintic_ext(b, zero);
+                let quotint_is_zero = self.is_equal_quintic_ext(quotient, zero);
+                let b_is_zero_and_quotient_is_zero = self.and(b_is_zero, quotint_is_zero);
+
+                let is_valid = self.or(b_is_zero_and_quotient_is_zero, quotient_check);
                 self.assert_bool(is_valid);
 
                 quotient
@@ -449,6 +453,7 @@ macro_rules! impl_circuit_builder_for_extension_degree {
 
             fn inverse_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget {
                 let one = self.one_quintic_ext();
+
                 let inverse = self.add_virtual_quintic_ext_target();
                 self.add_simple_generator(QuinticQuotientGenerator::new(one, x, inverse));
 
@@ -524,7 +529,8 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 let frob1 = self.frob_quintic_ext(x);
                 let frob2 = self.frob2_quintic_ext(x);
                 let frob1_times_frob2 = self.mul_quintic_ext(frob1, frob2);
-                let frob2_frob1_times_frob2 = self.frob_quintic_ext(frob1_times_frob2);
+                let frob2_frob1_times_frob2 = self.frob2_quintic_ext(frob1_times_frob2);
+
                 let x_to_r_minus_1 =
                     self.mul_quintic_ext(frob1_times_frob2, frob2_frob1_times_frob2);
                 let x_to_r_quintic = self.mul_quintic_ext(x_to_r_minus_1, x);
@@ -535,7 +541,14 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 let y31 = self.exp_power_of_2(y, 31);
                 let y63 = self.exp_power_of_2(y31, 32);
 
-                self.div(y63, y31)
+                // TODO upstream an inverse_or_zero gadget
+                let zero = self.zero();
+                let one = self.one();
+                let y31_is_zero = self.is_equal(y31, zero);
+                let denom = self.select(y31_is_zero, one, y31);
+                let res = self.div(y63, denom);
+
+                self.select(y31_is_zero, zero, res)
             }
 
             fn frob_quintic_ext(&mut self, x: QuinticExtensionTarget) -> QuinticExtensionTarget {
@@ -1001,6 +1014,64 @@ mod tests {
         let circuit = builder.build::<C>();
 
         let pw = PartialWitness::new();
+        let proof = circuit.prove(pw)?;
+        circuit.verify(proof)
+    }
+
+    #[test]
+    fn test_legendre_sym_quintic_ext() -> Result<()> {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        let mut rng = thread_rng();
+
+        let config = CircuitConfig::standard_recursion_config();
+
+        // legendre sym == 1
+        let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+
+        let x = GFp5::sample(&mut rng);
+        let square = builder.constant_quintic_ext(x * x);
+        let legendre_sym = builder.legendre_sym_quintic_ext(square);
+        builder.register_public_input(legendre_sym);
+
+        let circuit = builder.build::<C>();
+        
+        let mut pw = PartialWitness::new();
+        pw.set_target(legendre_sym, GFp::ONE);
+
+        let proof = circuit.prove(pw)?;
+        circuit.verify(proof)?;
+
+        // legendre sym == -1
+        let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+        
+        let non_square = gfp5_random_non_square();
+        let non_square = builder.constant_quintic_ext(non_square);
+        let legendre_sym = builder.legendre_sym_quintic_ext(non_square);
+        builder.register_public_input(legendre_sym);
+
+        let circuit = builder.build::<C>();
+
+        let mut pw = PartialWitness::new();
+        pw.set_target(legendre_sym, GFp::NEG_ONE);
+
+        let proof = circuit.prove(pw)?;
+        circuit.verify(proof)?;
+
+        // legendre sym == 0
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+
+        let zero = builder.zero_quintic_ext();
+        let legendre_sym = builder.legendre_sym_quintic_ext(zero);
+        builder.register_public_input(legendre_sym);
+
+        let circuit = builder.build::<C>();
+
+        let mut pw = PartialWitness::new();
+        pw.set_target(legendre_sym, GFp::ZERO);
+
         let proof = circuit.prove(pw)?;
         circuit.verify(proof)
     }
