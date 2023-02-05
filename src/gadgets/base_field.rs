@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+use plonky2_ecdsa::gadgets::nonnative::NonNativeTarget;
 use plonky2_field::extension::quintic::QuinticExtension;
 
 use plonky2::hash::hash_types::RichField;
@@ -8,13 +9,17 @@ use plonky2::iop::witness::{PartitionWitness, Witness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2_field::extension::{Extendable, FieldExtension};
 use plonky2_field::types::Field;
+use plonky2_ecdsa::gadgets::biguint::BigUintTarget;
+use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
+use plonky2_u32::gadgets::arithmetic_u32::U32Target;
 
 use crate::curve::base_field::SquareRoot;
+use crate::curve::scalar_field::Scalar;
 use crate::curve::{GFp, GFp5};
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 #[repr(transparent)]
-pub struct QuinticExtensionTarget([Target; 5]);
+pub struct QuinticExtensionTarget(pub [Target; 5]);
 
 impl QuinticExtensionTarget {
     pub fn new(limbs: [Target; 5]) -> Self {
@@ -121,6 +126,11 @@ pub trait CircuitBuilderGFp5<F: RichField + Extendable<5>> {
         a: Vec<QuinticExtensionTarget>,
         b: Vec<QuinticExtensionTarget>,
     ) -> QuinticExtensionTarget;
+
+    fn encode_quintic_ext_as_scalar(
+        &mut self,
+        x: QuinticExtensionTarget
+    ) -> NonNativeTarget<Scalar>;
 }
 
 pub trait PartialWitnessQuinticExt<F: RichField + Extendable<5>>: Witness<F> {
@@ -653,6 +663,36 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 }
                 self.add_many_quintic_ext(terms)
             }
+
+            // TODO optimize
+            fn encode_quintic_ext_as_scalar(
+                &mut self,
+                x: QuinticExtensionTarget,
+            ) -> NonNativeTarget<Scalar> {
+                let QuinticExtensionTarget([c0, c1, c2, c3, c4]) = x;
+
+                let bits = [
+                    self.split_le_base::<2>(c0, 64),
+                    self.split_le_base::<2>(c1, 64),
+                    self.split_le_base::<2>(c2, 64),
+                    self.split_le_base::<2>(c3, 64),
+                    self.split_le_base::<2>(c4, 64),
+                ].concat();
+
+                let limbs_u32 = bits.
+                    chunks(32)
+                    .map(|chunk| {
+                        let mut terms = vec![];
+                        for (i, term) in chunk.iter().enumerate() {
+                            terms.push(self.mul_const(GFp::from_canonical_u32(1 << i), *term));
+                        }
+
+                        U32Target(self.add_many(terms))
+                    }).collect::<Vec<_>>();
+                
+                let biguint = BigUintTarget { limbs: limbs_u32 };
+                self.reduce::<Scalar>(&biguint)
+            }
         }
     };
 }
@@ -767,15 +807,19 @@ impl SimpleGenerator<GFp> for QuinticSqrtGenerator {
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
+    use num::BigUint;
     use plonky2::field::types::{Field, Sample};
     use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use plonky2_field::types::PrimeField64;
     use rand::thread_rng;
 
     use super::*;
+    use crate::curve::scalar_field::biguint_from_array;
     use crate::curve::test_utils::{gfp5_random_non_square, gfp5_random_sgn0_eq_0};
+    use crate::gadgets::scalar_field::{CircuitBuilderScalar, PartialWitnessScalar};
 
     #[test]
     fn test_add() -> Result<()> {
@@ -1089,6 +1133,39 @@ mod tests {
 
         let mut pw = PartialWitness::new();
         pw.set_target(legendre_sym, GFp::ZERO);
+
+        let proof = circuit.prove(pw)?;
+        circuit.verify(proof)
+    }
+
+    #[test]
+    fn test_encode_as_scalar() -> Result<()> {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        let mut rng = thread_rng();
+
+        let config = CircuitConfig::standard_recursion_config();
+
+        let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+        let x = GFp5::sample(&mut rng);
+
+        let QuinticExtension(limbs) = x;
+        let encoded_expected = Scalar::from_noncanonical_biguint(
+            biguint_from_array(limbs.map(|l| l.to_canonical_u64()))
+        );
+
+
+        let x = builder.constant_quintic_ext(x);
+        let encoded = builder.encode_quintic_ext_as_scalar(x);
+        let encoded_as_biguint = builder.nonnative_to_canonical_biguint(&encoded);
+        builder.register_scalar_public_input(&encoded_as_biguint);
+
+        let circuit = builder.build::<C>();
+
+        let mut pw = PartialWitness::new();
+        pw.set_scalar_target(&encoded_as_biguint, encoded_expected);
 
         let proof = circuit.prove(pw)?;
         circuit.verify(proof)

@@ -3,6 +3,7 @@
 /// with some modifications to make it play more nicely with plonky2 primitives
 /// His implementation can be found here: https://github.com/pornin/ecgfp5
 use alloc::vec::Vec;
+use plonky2_field::extension::quintic::QuinticExtension;
 use rand::RngCore;
 use core::fmt::{self, Debug, Display, Formatter};
 use core::hash::{Hash, Hasher};
@@ -14,7 +15,9 @@ use num::bigint::BigUint;
 use num::One;
 use serde::{Deserialize, Serialize};
 
-use plonky2_field::types::{Field, PrimeField, Sample};
+use plonky2_field::types::{Field, PrimeField, Sample, PrimeField64};
+
+use super::{GFp5, GFp};
 
 /// The Scalar field of the ECgFP5 elliptic curve.
 ///
@@ -230,7 +233,7 @@ impl PrimeField for Scalar {
     }
 }
 
-fn biguint_from_array(arr: [u64; 5]) -> BigUint {
+pub(crate) fn biguint_from_array(arr: [u64; 5]) -> BigUint {
     BigUint::from_slice(&[
         arr[0] as u32,
         (arr[0] >> 32) as u32,
@@ -451,6 +454,13 @@ impl Scalar {
             r.0[i] &= c;
         }
         (r, c)
+    }
+
+    pub fn from_gfp5(x: GFp5) -> Self {
+        let QuinticExtension(limbs) = x;
+        Self::from_noncanonical_biguint(
+            biguint_from_array(limbs.map(|l| l.to_canonical_u64()))
+        )
     }
 
     /// Decode the provided byte slice into a scalar. The bytes are

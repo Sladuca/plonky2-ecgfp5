@@ -42,10 +42,10 @@ pub trait CircuitBuilderEcGFp5 {
     fn curve_double(&mut self, a: CurveTarget) -> CurveTarget;
 
     fn precompute_window(&mut self, a: CurveTarget, window_bits: usize) -> Vec<CurveTarget>;
-    fn curve_scalar_mul(&mut self, a: CurveTarget, scalar: NonNativeTarget<Scalar>) -> CurveTarget;
+    fn curve_scalar_mul(&mut self, a: CurveTarget, scalar: &NonNativeTarget<Scalar>) -> CurveTarget;
 
     fn precompute_window_const(&mut self, point: Point, window_bits: usize) -> Vec<CurveTarget>;
-    fn curve_scalar_mul_const(&mut self, point: Point, scalar: NonNativeTarget<Scalar>) -> CurveTarget;
+    fn curve_scalar_mul_const(&mut self, point: Point, scalar: &NonNativeTarget<Scalar>) -> CurveTarget;
 
     fn curve_encode_to_quintic_ext(&mut self, a: CurveTarget) -> QuinticExtensionTarget;
     fn curve_decode_from_quintic_ext(&mut self, w: QuinticExtensionTarget) -> CurveTarget;
@@ -218,7 +218,7 @@ macro_rules! impl_circuit_builder_for_extension_degree {
             fn curve_scalar_mul(
                 &mut self,
                 a: CurveTarget,
-                scalar: NonNativeTarget<Scalar>,
+                scalar: &NonNativeTarget<Scalar>,
             ) -> CurveTarget {
                 let window = self.precompute_window(a, 4);
                 let four_bit_limbs = self.split_nonnative_to_4_bit_limbs(&scalar);
@@ -250,7 +250,7 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 multiples
             }
 
-            fn curve_scalar_mul_const(&mut self, point: Point, scalar: NonNativeTarget<Scalar>, ) -> CurveTarget {
+            fn curve_scalar_mul_const(&mut self, point: Point, scalar: &NonNativeTarget<Scalar>, ) -> CurveTarget {
                 let window = self.precompute_window_const(point, 4);
                 let four_bit_limbs = self.split_nonnative_to_4_bit_limbs(&scalar);
 
@@ -460,7 +460,7 @@ mod tests {
         let p = builder.curve_constant(p.to_weierstrass());
         let s = builder.constant_nonnative(s);
 
-        let prod = builder.curve_scalar_mul(p, s);
+        let prod = builder.curve_scalar_mul(p, &s);
         builder.register_curve_public_input(prod);
         
         let circuit = builder.build::<C>();
@@ -489,7 +489,7 @@ mod tests {
 
         let s = builder.constant_nonnative(s);
 
-        let prod = builder.curve_scalar_mul_const(p, s);
+        let prod = builder.curve_scalar_mul_const(p, &s);
         builder.register_curve_public_input(prod);
         
         let circuit = builder.build::<C>();

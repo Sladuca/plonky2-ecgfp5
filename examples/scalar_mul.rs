@@ -28,7 +28,7 @@ pub fn main() {
 	let p = builder.curve_constant(p.to_weierstrass());
 	let s = builder.constant_nonnative(s);
 
-	let prod = builder.curve_scalar_mul(p, s);
+	let prod = builder.curve_scalar_mul(p, &s);
 	builder.register_curve_public_input(prod);
 	
 	builder.print_gate_counts(0);
@@ -58,7 +58,7 @@ pub fn main() {
 
 	let s = builder.constant_nonnative(s);
 
-	let prod = builder.curve_scalar_mul_const(p, s);
+	let prod = builder.curve_scalar_mul_const(p, &s);
 	builder.register_curve_public_input(prod);
 	
 	builder.print_gate_counts(0);
