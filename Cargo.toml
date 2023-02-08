@@ -1,6 +1,6 @@
 [package]
 name = "plonky2_ecgfp5"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Sebastien La Duca <sladuca777@gmail.com>"]
 readme = "README.md"
