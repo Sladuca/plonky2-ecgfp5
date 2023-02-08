@@ -87,14 +87,18 @@ pub fn main() {
 	let s = builder.constant_nonnative::<Scalar>(s);
 	let e = builder.constant_nonnative::<Scalar>(e);
 
-	// r_v = s*G + e*pk
+	let g = builder.curve_constant(Point::GENERATOR.to_weierstrass());
+	let pk_target = builder.curve_constant(pk.to_weierstrass());
 
-	let g_to_s = builder.curve_scalar_mul_const(Point::GENERATOR, &s);
-	let pk_to_e = builder.curve_scalar_mul_const(pk, &e);
-	let r_v = builder.curve_add(g_to_s, pk_to_e);
+	// r_v = s*G + e*pk
+	let r_v = builder.curve_muladd_2(
+		g,
+		pk_target,
+		&s,
+		&e
+	);
 
 	// e_v = H(R || m)
-
 	let mut preimage = builder.curve_encode_to_quintic_ext(r_v).0.to_vec();
 	preimage.extend(&m.0);
 	let e_v_ext = QuinticExtensionTarget(
@@ -106,6 +110,7 @@ pub fn main() {
 	builder.connect_nonnative(&e, &e_v);
 
 	// build circuit
+	builder.print_gate_counts(0);
 	let circuit = builder.build::<C>();
 	let CircuitData { prover_only, common, verifier_only: _ } = &circuit;
 

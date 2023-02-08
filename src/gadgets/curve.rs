@@ -43,7 +43,7 @@ pub trait CircuitBuilderEcGFp5 {
     fn curve_encode_to_quintic_ext(&mut self, a: CurveTarget) -> QuinticExtensionTarget;
     fn curve_decode_from_quintic_ext(&mut self, w: QuinticExtensionTarget) -> CurveTarget;
 
-    // TODO: verify_muladd
+    fn curve_muladd_2(&mut self, a: CurveTarget, b: CurveTarget, scalar_a: &NonNativeTarget<Scalar>, scalar_b: &NonNativeTarget<Scalar>) -> CurveTarget;
 }
 
 macro_rules! impl_circuit_builder_for_extension_degree {
@@ -223,7 +223,7 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 
                 for _ in 3..(1 << window_bits) {
                     multiples.push(
-                        self.curve_add_spec(multiples.last().unwrap().clone(), a)
+                        self.curve_add(multiples.last().unwrap().clone(), a)
                     );
                 }
 
@@ -250,13 +250,7 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                     res = self.curve_add(res, addend);
                 }
 
-                // we check if `a` was the point at infinity. If it was, we set the flag and return the point at infinity
-                let CurveTarget((_, a_is_inf)) = a;
-                let CurveTarget((res_coords, mut res_is_inf)) = res;
-
-                res_is_inf = self.or(res_is_inf, a_is_inf);
-
-                CurveTarget((res_coords, res_is_inf))
+                res
             }
 
 
@@ -339,6 +333,34 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 // since we checked above that w is zero if delta is not a sqrt, we can just set is_inf to delta_is_not_sqrt
                 let is_inf = self.not(delta_is_sqrt);
                 CurveTarget(([x, y], is_inf))
+            }
+
+            fn curve_muladd_2(&mut self, a: CurveTarget, b: CurveTarget, scalar_a: &NonNativeTarget<Scalar>, scalar_b: &NonNativeTarget<Scalar>) -> CurveTarget {
+                let a_window = self.precompute_window(a, 4);
+                let a_four_bit_limbs = self.split_nonnative_to_4_bit_limbs(&scalar_a);
+
+                let b_window = self.precompute_window(b, 4);
+                let b_four_bit_limbs = self.split_nonnative_to_4_bit_limbs(&scalar_b);
+
+                debug_assert!(a_four_bit_limbs.len() == b_four_bit_limbs.len());
+
+                let num_limbs = a_four_bit_limbs.len();
+                let a_start = self.curve_random_access(a_four_bit_limbs[num_limbs - 1], &a_window);
+                let b_start = self.curve_random_access(b_four_bit_limbs[num_limbs - 1], &b_window);
+                let mut res = self.curve_add(a_start, b_start);
+
+                for (a_limb, b_limb) in a_four_bit_limbs.into_iter().zip(b_four_bit_limbs).rev().skip(1) {
+                    for _ in 0..4 {
+                        res = self.curve_double(res);
+                    }
+
+                    let a_addend = self.curve_random_access(a_limb, &a_window);
+                    let b_addend = self.curve_random_access(b_limb, &b_window);
+                    let addend = self.curve_add(a_addend, b_addend);
+                    res = self.curve_add(res, addend);
+                }
+
+                res
             }
         }
     };
@@ -572,6 +594,41 @@ mod tests {
 
         let mut pw = PartialWitness::new();
         pw.set_curve_target(p, p_expected.to_weierstrass());
+
+        let proof = circuit.prove(pw)?;
+        circuit.verify(proof)
+    }
+
+    #[test]
+    fn test_curve_muladd_2() -> Result<()> {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        let mut rng = thread_rng();
+
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+
+        let p1 = Point::sample(&mut rng);
+        let p2 = Point::sample(&mut rng);
+        let s1 = Scalar::sample(&mut rng);
+        let s2 = Scalar::sample(&mut rng);
+        let prod_expected = p1 * s1 + p2 * s2;
+
+        let p1 = builder.curve_constant(p1.to_weierstrass());
+        let s1 = builder.constant_nonnative(s1);
+
+        let p2 = builder.curve_constant(p2.to_weierstrass());
+        let s2 = builder.constant_nonnative(s2);
+
+        let prod = builder.curve_muladd_2(p1, p2, &s1, &s2);
+        builder.register_curve_public_input(prod);
+        
+        let circuit = builder.build::<C>();
+
+        let mut pw = PartialWitness::new();
+        pw.set_curve_target(prod, prod_expected.to_weierstrass());
 
         let proof = circuit.prove(pw)?;
         circuit.verify(proof)
