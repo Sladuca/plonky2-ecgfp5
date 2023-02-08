@@ -15,14 +15,6 @@ use plonky2_field::goldilocks_field::GoldilocksField;
 
 use super::base_field::PartialWitnessQuinticExt;
 
-const THREE: GFp5 = QuinticExtension([
-    GoldilocksField(3),
-    GFp::ZERO,
-    GFp::ZERO,
-    GFp::ZERO,
-    GFp::ZERO,
-]);
-
 #[derive(Copy, Clone, Debug)]
 #[repr(transparent)]
 pub struct CurveTarget(([QuinticExtensionTarget; 2], BoolTarget));
@@ -39,6 +31,7 @@ pub trait CircuitBuilderEcGFp5 {
     fn curve_random_access(&mut self, access_index: Target, v: &[CurveTarget]) -> CurveTarget;
 
     fn curve_add(&mut self, a: CurveTarget, b: CurveTarget) -> CurveTarget;
+    fn curve_add_spec(&mut self, a: CurveTarget, b: CurveTarget) -> CurveTarget;
     fn curve_double(&mut self, a: CurveTarget) -> CurveTarget;
 
     fn precompute_window(&mut self, a: CurveTarget, window_bits: usize) -> Vec<CurveTarget>;
@@ -156,12 +149,12 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 let lambda_0_if_x_not_same = self.sub_quintic_ext(y2, y1);
 
                 let mut lambda_0_if_x_same = self.square_quintic_ext(x1);
-                lambda_0_if_x_same = self.mul_const_quintic_ext(THREE, lambda_0_if_x_same);
+                lambda_0_if_x_same = self.triple_quintic_ext(lambda_0_if_x_same);
                 lambda_0_if_x_same =
                     self.add_const_quintic_ext(lambda_0_if_x_same, WeierstrassPoint::A);
 
                 let lambda_1_if_x_not_same = self.sub_quintic_ext(x2, x1);
-                let lambda_1_if_x_same = self.mul_const_quintic_ext(GFp5::TWO, y1);
+                let lambda_1_if_x_same = self.double_quintic_ext(y1);
 
                 let lambda_0 = self.select_quintic_ext(x_same, lambda_0_if_x_same, lambda_0_if_x_not_same);
                 let lambda_1 = self.select_quintic_ext(x_same, lambda_1_if_x_same, lambda_1_if_x_not_same);
@@ -182,18 +175,37 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 self.curve_select(b_is_inf, a, sel)
             }
 
+            fn curve_add_spec(&mut self, a: CurveTarget, b: CurveTarget) -> CurveTarget {
+                let CurveTarget(([x1, y1], _)) = a;
+                let CurveTarget(([x2, y2], _)) = b;
+
+                let lambda_0 = self.sub_quintic_ext(y2, y1);
+                let lambda_1 = self.sub_quintic_ext(x2, x1);
+                let lambda = self.div_or_zero_quintic_ext(lambda_0, lambda_1);
+
+                let mut x3 = self.square_quintic_ext(lambda);
+                x3 = self.sub_quintic_ext(x3, x1);
+                x3 = self.sub_quintic_ext(x3, x2);
+
+                let mut y3 = self.sub_quintic_ext(x1, x3);
+                y3 = self.mul_quintic_ext(lambda, y3);
+                y3 = self.sub_quintic_ext(y3, y1);
+
+                CurveTarget(([x3, y3], BoolTarget::new_unsafe(self.zero())))
+            }
+
             fn curve_double(&mut self, a: CurveTarget) -> CurveTarget {
                 let CurveTarget(([x, y], is_inf)) = a;
 
                 let mut lambda_0 = self.square_quintic_ext(x);
-                lambda_0 = self.mul_const_quintic_ext(THREE, lambda_0);
+                lambda_0 = self.triple_quintic_ext(lambda_0);
                 lambda_0 = self.add_const_quintic_ext(lambda_0, WeierstrassPoint::A);
-                let lambda_1 = self.mul_const_quintic_ext(GFp5::TWO, y);
+                let lambda_1 = self.double_quintic_ext(y);
 
                 let lambda = self.div_or_zero_quintic_ext(lambda_0, lambda_1);
 
                 let mut x2 = self.square_quintic_ext(lambda);
-                let two_x = self.mul_const_quintic_ext(GFp5::TWO, x);
+                let two_x = self.double_quintic_ext(x);
                 x2 = self.sub_quintic_ext(x2, two_x);
 
                 let mut y2 = self.sub_quintic_ext(x, x2);
@@ -204,10 +216,14 @@ macro_rules! impl_circuit_builder_for_extension_degree {
             }
 
             fn precompute_window(&mut self, a: CurveTarget, window_bits: usize) -> Vec<CurveTarget> {
+                debug_assert!(window_bits > 1);
                 let mut multiples = vec![self.curve_zero()];
-                for _ in 1..(1 << window_bits) {
+                multiples.push(a);
+                multiples.push(self.curve_double(a));
+                
+                for _ in 3..(1 << window_bits) {
                     multiples.push(
-                        self.curve_add(multiples.last().unwrap().clone(), a)
+                        self.curve_add_spec(multiples.last().unwrap().clone(), a)
                     );
                 }
 
@@ -234,7 +250,13 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                     res = self.curve_add(res, addend);
                 }
 
-                res
+                // we check if `a` was the point at infinity. If it was, we set the flag and return the point at infinity
+                let CurveTarget((_, a_is_inf)) = a;
+                let CurveTarget((res_coords, mut res_is_inf)) = res;
+
+                res_is_inf = self.or(res_is_inf, a_is_inf);
+
+                CurveTarget((res_coords, res_is_inf))
             }
 
 

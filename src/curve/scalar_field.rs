@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use plonky2_field::types::{Field, PrimeField, Sample, PrimeField64};
 
-use super::{GFp5, GFp};
+use super::GFp5;
 
 /// The Scalar field of the ECgFP5 elliptic curve.
 ///

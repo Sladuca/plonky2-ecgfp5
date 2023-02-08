@@ -1,6 +1,7 @@
 use alloc::vec::Vec;
 use plonky2_ecdsa::gadgets::nonnative::NonNativeTarget;
 use plonky2_field::extension::quintic::QuinticExtension;
+use plonky2_field::goldilocks_field::GoldilocksField;
 
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::generator::{GeneratedValues, SimpleGenerator};
@@ -16,6 +17,9 @@ use plonky2_u32::gadgets::arithmetic_u32::U32Target;
 use crate::curve::base_field::SquareRoot;
 use crate::curve::scalar_field::Scalar;
 use crate::curve::{GFp, GFp5};
+
+const SIX: GFp = GoldilocksField(6);
+const THREE: GFp = GoldilocksField(3);
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 #[repr(transparent)]
@@ -55,6 +59,9 @@ pub trait CircuitBuilderGFp5<F: RichField + Extendable<5>> {
         a: QuinticExtensionTarget,
         b: QuinticExtensionTarget,
     ) -> BoolTarget;
+
+    fn double_quintic_ext(&mut self, a: QuinticExtensionTarget) -> QuinticExtensionTarget;
+    fn triple_quintic_ext(&mut self, a: QuinticExtensionTarget) -> QuinticExtensionTarget;
 
     fn neg_quintic_ext(&mut self, a: QuinticExtensionTarget) -> QuinticExtensionTarget;
     fn add_quintic_ext(
@@ -325,6 +332,34 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 ])
             }
 
+            fn double_quintic_ext(
+                &mut self,
+                a: QuinticExtensionTarget,
+            ) -> QuinticExtensionTarget {
+                let QuinticExtensionTarget([a0, a1, a2, a3, a4]) = a;
+                QuinticExtensionTarget::new([
+                    self.mul_const(GFp::TWO, a0),
+                    self.mul_const(GFp::TWO, a1),
+                    self.mul_const(GFp::TWO, a2),
+                    self.mul_const(GFp::TWO, a3),
+                    self.mul_const(GFp::TWO, a4),
+                ])
+            }
+
+            fn triple_quintic_ext(
+                &mut self,
+                a: QuinticExtensionTarget,
+            ) -> QuinticExtensionTarget {
+                let QuinticExtensionTarget([a0, a1, a2, a3, a4]) = a;
+                QuinticExtensionTarget::new([
+                    self.mul_const(THREE, a0),
+                    self.mul_const(THREE, a1),
+                    self.mul_const(THREE, a2),
+                    self.mul_const(THREE, a3),
+                    self.mul_const(THREE, a4),
+                ])
+            }
+
             fn add_quintic_ext(
                 &mut self,
                 a: QuinticExtensionTarget,
@@ -424,14 +459,42 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 QuinticExtensionTarget::new([c0, c1, c2, c3, c4])
             }
 
-            // TODO optimize
             fn mul_const_quintic_ext(
                 &mut self,
                 c: GFp5,
                 a: QuinticExtensionTarget,
             ) -> QuinticExtensionTarget {
-                let c = self.constant_quintic_ext(c);
-                self.mul_quintic_ext(c, a)
+
+                let QuinticExtensionTarget([a0, a1, a2, a3, a4]) = a;
+                let QuinticExtension([c0, c1, c2, c3, c4]) = c;
+                let one = self.one();
+
+                let lhs = self.arithmetic(c1, c2, one, a4, a3);
+                let rhs = self.arithmetic(c3, c4, one, a2, a1);
+                let mut r0 = self.add(lhs, rhs);
+                r0 = self.arithmetic(c0, THREE, one, a0, r0);
+
+                let mut rhs = self.arithmetic(c2, c3, one, a4, a3);
+                rhs = self.arithmetic(c4 * THREE, THREE, one, a2, rhs);
+                let lhs = self.arithmetic(c0, c1, one, a1, a0);
+                let r1 = self.add(lhs, rhs);
+
+                let mut rhs = self.arithmetic(c3, c4, one, a4, a3);
+                rhs = self.arithmetic(c2, THREE, one, a0, rhs);
+                let lhs = self.arithmetic(c0, c1, one, a2, a1);
+                let r2 = self.add(lhs, rhs);
+
+                let mut rhs = self.arithmetic(c3, THREE * c4, one, a0, a4);
+                rhs = self.arithmetic(c2, GFp::ONE, one, a1, rhs);
+                let lhs = self.arithmetic(c0, c1, one, a3, a2);
+                let r3 = self.add(lhs, rhs);
+
+                let mut rhs = self.arithmetic(c3, c4, one, a1, a0);
+                rhs = self.arithmetic(c2, GFp::ONE, one, a2, rhs);
+                let lhs = self.arithmetic(c0, c1, one, a4, a3);
+                let r4 = self.add(lhs, rhs);
+
+                QuinticExtensionTarget::new([r0, r1, r2, r3, r4])
             }
 
             fn div_quintic_ext(
@@ -453,19 +516,27 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 a: QuinticExtensionTarget,
                 b: QuinticExtensionTarget,
             ) -> QuinticExtensionTarget {
-                let zero = self.zero_quintic_ext();
                 let quotient = self.add_virtual_quintic_ext_target();
                 self.add_simple_generator(QuinticQuotientGenerator::new(a, b, quotient));
 
                 let quotient_times_denominator = self.mul_quintic_ext(quotient, b);
-                let quotient_check = self.is_equal_quintic_ext(quotient_times_denominator, a);
+                let zero_if_prod_is_a = self.sub_quintic_ext(quotient_times_denominator, a);
                 
-                let b_is_zero = self.is_equal_quintic_ext(b, zero);
-                let quotint_is_zero = self.is_equal_quintic_ext(quotient, zero);
-                let b_is_zero_and_quotient_is_zero = self.and(b_is_zero, quotint_is_zero);
-
-                let is_valid = self.or(b_is_zero_and_quotient_is_zero, quotient_check);
-                self.assert_bool(is_valid);
+                // check zero
+                // we can do the multiplication limb-wise here, as their product is zero
+                // iff one of them is all zeros
+                let QuinticExtensionTarget([b0, b1, b2, b3, b4]) = b;
+                let QuinticExtensionTarget([p0, p1, p2, p3, p4]) = zero_if_prod_is_a;
+                let z0 = self.mul(b0, p0);
+                let z1 = self.mul(b1, p1);
+                let z2 = self.mul(b2, p2);
+                let z3 = self.mul(b3, p3);
+                let z4 = self.mul(b4, p4);
+                self.assert_zero(z0);
+                self.assert_zero(z1);
+                self.assert_zero(z2);
+                self.assert_zero(z3);
+                self.assert_zero(z4);
 
                 quotient
             }
@@ -636,9 +707,39 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 (canonical_root_x, is_sqrt)
             }
 
-            // TODO optimize
             fn square_quintic_ext(&mut self, a: QuinticExtensionTarget) -> QuinticExtensionTarget {
-                self.mul_quintic_ext(a, a)
+                let zero = self.zero();
+                let QuinticExtensionTarget([a0, a1, a2, a3, a4]) = a;
+
+                // c0 ← a0^2 + 6a1a4 + 6a2a3
+                // c1 ← 3a3^2 + 2a0a1 + 6a2a4
+                // c2 ← a1^2 + 2a0a2 + 6a3a4
+                // c3 ← 3a4^2 + 2a0a3 + 2a1a2
+                // c4 ← a2^2 + 2a0a4 + 2a1a3
+
+                let mut c0 = self.square(a0);
+                c0 = self.arithmetic(SIX, GFp::ONE, a1, a4, c0);
+                c0 = self.arithmetic(SIX, GFp::ONE, a2, a3, c0);
+
+                let mut c1 = self.arithmetic(THREE, GFp::ZERO, a3, a3, zero);
+                c1 = self.arithmetic(GFp::TWO, GFp::ONE, a0, a1, c1);
+                c1 = self.arithmetic(SIX, GFp::ONE, a2, a4, c1);
+                
+                let mut c2 = self.square(a1);
+                c2 = self.arithmetic(GFp::TWO, GFp::ONE, a0, a2, c2);
+                c2 = self.arithmetic(SIX, GFp::ONE, a3, a4, c2);
+
+                let mut c3 = self.arithmetic(THREE, GFp::ZERO, a4, a4, zero);
+                c3 = self.arithmetic(GFp::TWO, GFp::ONE, a0, a3, c3);
+                c3 = self.arithmetic(GFp::TWO, GFp::ONE, a1, a2, c3);
+
+                let mut c4 = self.square(a2);
+                c4 = self.arithmetic(GFp::TWO, GFp::ONE, a0, a4, c4);
+                c4 = self.arithmetic(GFp::TWO, GFp::ONE, a1, a3, c4);
+
+                QuinticExtensionTarget([c0, c1, c2, c3, c4])
+
+                // self.mul_quintic_ext(a, a)
             }
 
             fn add_many_quintic_ext(
