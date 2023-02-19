@@ -60,6 +60,8 @@ pub trait CircuitBuilderGFp5<F: RichField + Extendable<5>> {
         b: QuinticExtensionTarget,
     ) -> BoolTarget;
 
+    fn arithmetic_quintic_ext(&mut self, c0: GFp5, c1: GFp5, x: QuinticExtensionTarget, y: QuinticExtensionTarget, z: QuinticExtensionTarget) -> QuinticExtensionTarget;
+
     fn double_quintic_ext(&mut self, a: QuinticExtensionTarget) -> QuinticExtensionTarget;
     fn triple_quintic_ext(&mut self, a: QuinticExtensionTarget) -> QuinticExtensionTarget;
 
@@ -330,6 +332,15 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                     self.neg(a3),
                     self.neg(a4),
                 ])
+            }
+
+            fn arithmetic_quintic_ext(&mut self, c0: GFp5, c1: GFp5, x: QuinticExtensionTarget, y: QuinticExtensionTarget, z: QuinticExtensionTarget) -> QuinticExtensionTarget {
+                let mut mul = self.mul_quintic_ext(x, y);
+                mul = self.mul_const_quintic_ext(c0, mul);
+
+                let add = self.mul_const_quintic_ext(c1, z);
+
+                self.add_quintic_ext(mul, add)
             }
 
             fn double_quintic_ext(
