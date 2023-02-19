@@ -1,1 +1,1 @@
-pub(crate) mod gfp5;
+pub(crate) mod gfp5_mul;

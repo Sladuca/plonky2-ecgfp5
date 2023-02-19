@@ -4,10 +4,10 @@ use alloc::vec::Vec;
 use plonky2::{plonk::{circuit_data::CircuitConfig, vars::{EvaluationVars, EvaluationVarsBase, EvaluationTargets}, circuit_builder::CircuitBuilder}, hash::hash_types::RichField, gates::{gate::Gate, util::StridedConstraintConsumer}, iop::{ext_target::ExtensionTarget, target::Target, generator::{SimpleGenerator, GeneratedValues, WitnessGenerator}, witness::{PartitionWitness, Witness, WitnessWrite}}};
 use plonky2_field::{extension::{Extendable}, types::Field};
 
-/// A gate which can perform a weighted multiply-add, i.e. `result = c0 x y + c1 z`. If the config
+/// A gate which can perform a weighted multiply, i.e. `result = c0 x y`. If the config
 /// supports enough routed wires, it can support several such operations in one gate.
 #[derive(Debug, Clone)]
-pub struct ArithmeticGFp5Gate {
+pub struct MulGFp5Gate {
     /// Number of arithmetic operations performed by an arithmetic gate.
     pub num_ops: usize,
 }
@@ -17,10 +17,10 @@ const DEGREE: usize = 5;
 
 // need 20 wires per operation
 // each element needs 5 wires
-// each operation needs 4 elements (multiplicand 0, multiplicand 1, addend, output)
-const WIRES_PER_OP: usize = 4 * DEGREE;
+// each operation needs 3 elements (multiplicand 0, multiplicand 1, output)
+const WIRES_PER_OP: usize = 3 * DEGREE;
 
-impl ArithmeticGFp5Gate {
+impl MulGFp5Gate {
     pub fn new_from_config(config: &CircuitConfig) -> Self {
         Self {
             num_ops: Self::num_ops(config),
@@ -33,42 +33,36 @@ impl ArithmeticGFp5Gate {
     }
 
     pub fn wires_ith_multiplicand_0(i: usize) -> Range<usize> {
-        4 * DEGREE * i..4 * DEGREE * i + DEGREE
+        3 * DEGREE * i..3 * DEGREE * i + DEGREE
     }
     pub fn wires_ith_multiplicand_1(i: usize) -> Range<usize> {
-        4 * DEGREE * i + DEGREE..4 * DEGREE * i + 2 * DEGREE
-    }
-    pub fn wires_ith_addend(i: usize) -> Range<usize> {
-        4 * DEGREE * i + 2 * DEGREE..4 * DEGREE * i + 3 * DEGREE
+        3 * DEGREE * i + DEGREE..3 * DEGREE * i + 2 * DEGREE
     }
     pub fn wires_ith_output(i: usize) -> Range<usize> {
-        4 * DEGREE * i + 3 * DEGREE..4 * DEGREE * i + 4 * DEGREE
+        3 * DEGREE * i + 2 * DEGREE..3 * DEGREE * i + 3 * DEGREE
     }
 }
 
-impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for ArithmeticGFp5Gate {
+impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for MulGFp5Gate {
     fn id(&self) -> String {
         format!("{self:?}")
     }
 
     fn eval_unfiltered(&self, vars: EvaluationVars<F, D>) -> Vec<F::Extension> {
-        let const_0_limbs = vars.local_constants[0..DEGREE].try_into().unwrap();
-        let const_1_limbs = vars.local_constants[DEGREE..2*DEGREE].try_into().unwrap();
+        let c = vars.local_constants[0];
 
         let mut constraints = Vec::new();
         for i in 0..self.num_ops {
             let multiplicand_0_limbs: [F::Extension; 5] = vars.local_wires[Self::wires_ith_multiplicand_0(i)].try_into().unwrap();
 			let multiplicand_1_limbs: [F::Extension; 5] = vars.local_wires[Self::wires_ith_multiplicand_1(i)].try_into().unwrap();
-			let addend_limbs: [F::Extension; 5] = vars.local_wires[Self::wires_ith_addend(i)].try_into().unwrap();
 			let output_limbs: [F::Extension; 5] = vars.local_wires[Self::wires_ith_output(i)].try_into().unwrap();
 
-			let xy_limbs = gfp5_mul_limbwise(multiplicand_0_limbs, multiplicand_1_limbs);
-			let axy_limbs = gfp5_mul_limbwise(const_0_limbs, xy_limbs);
-			let bz_limbs = gfp5_mul_limbwise(const_1_limbs, addend_limbs);
+			let prod_limbs = gfp5_mul_limbwise(multiplicand_0_limbs, multiplicand_1_limbs);
+            let computed_output_limbs = gfp5_scalar_mul_limbwise(c, prod_limbs);
 
-			for (output_limb, (axy_limb, bz_limb)) in output_limbs.into_iter().zip(axy_limbs.into_iter().zip(bz_limbs)) {
-				constraints.push(output_limb - (axy_limb + bz_limb));
-			}
+            for (output_limb, computed_output_limb) in output_limbs.into_iter().zip(computed_output_limbs) {
+                constraints.push(output_limb - computed_output_limb);
+            }
         }
 
         constraints
@@ -79,22 +73,20 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for ArithmeticGFp5
         vars: EvaluationVarsBase<F>,
         mut yield_constr: StridedConstraintConsumer<F>,
     ) {
-        let const_0_limbs = vars.local_constants.view(0..DEGREE).try_into().unwrap();
-        let const_1_limbs = vars.local_constants.view(DEGREE..2*DEGREE).try_into().unwrap();
+        let const_limbs = vars.local_constants[0];
 
         for i in 0..self.num_ops {
 			let multiplicand_0_limbs = vars.local_wires.view(Self::wires_ith_multiplicand_0(i)).try_into().unwrap();
 			let multiplicand_1_limbs = vars.local_wires.view(Self::wires_ith_multiplicand_1(i)).try_into().unwrap();
-			let addend_limbs = vars.local_wires.view(Self::wires_ith_addend(i)).try_into().unwrap();
 			let output_limbs: [F; 5] = vars.local_wires.view(Self::wires_ith_output(i)).try_into().unwrap();
 
-			let xy_limbs = gfp5_mul_limbwise(multiplicand_0_limbs, multiplicand_1_limbs);
-			let axy_limbs = gfp5_mul_limbwise(const_0_limbs, xy_limbs);
-			let bz_limbs = gfp5_mul_limbwise(const_1_limbs, addend_limbs);
+			let prod_limbs = gfp5_mul_limbwise(multiplicand_0_limbs, multiplicand_1_limbs);
+            let computed_output_limbs = gfp5_scalar_mul_limbwise(const_limbs, prod_limbs);
 
-			for (output_limb, (axy_limb, bz_limb)) in output_limbs.into_iter().zip(axy_limbs.into_iter().zip(bz_limbs)) {
-				yield_constr.one(output_limb - (axy_limb + bz_limb));
-			}
+            for (output_limb, computed_output_limb) in output_limbs.into_iter().zip(computed_output_limbs) {
+                yield_constr.one(output_limb - computed_output_limb);
+            }
+
         }
     }
 
@@ -103,25 +95,22 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for ArithmeticGFp5
         builder: &mut CircuitBuilder<F, D>,
         vars: EvaluationTargets<D>,
     ) -> Vec<ExtensionTarget<D>> {
-        let const_0_limbs: [ExtensionTarget<D>; 5] = vars.local_constants[0..DEGREE].try_into().unwrap();
-        let const_1_limbs: [ExtensionTarget<D>; 5] = vars.local_constants[DEGREE..2*DEGREE].try_into().unwrap();
+        let c = vars.local_constants[0];
 
         let mut constraints = Vec::new();
         for i in 0..self.num_ops {
             let multiplicand_0_limbs: [ExtensionTarget<D>; 5] = vars.local_wires[Self::wires_ith_multiplicand_0(i)].try_into().unwrap();
 			let multiplicand_1_limbs: [ExtensionTarget<D>; 5] = vars.local_wires[Self::wires_ith_multiplicand_1(i)].try_into().unwrap();
-			let addend_limbs: [ExtensionTarget<D>; 5] = vars.local_wires[Self::wires_ith_addend(i)].try_into().unwrap();
 			let output_limbs: [ExtensionTarget<D>; 5] = vars.local_wires[Self::wires_ith_output(i)].try_into().unwrap();
 
-			let xy_limbs = gfp5_mul_limbwise_circuit_lifted(builder, multiplicand_0_limbs, multiplicand_1_limbs);
-			let axy_limbs = gfp5_mul_limbwise_circuit_lifted(builder, const_0_limbs, xy_limbs);
-			let bz_limbs = gfp5_mul_limbwise_circuit_lifted(builder, const_1_limbs, addend_limbs);
+			let prod_limbs = gfp5_mul_limbwise_circuit_lifted(builder, multiplicand_0_limbs, multiplicand_1_limbs);
+            let computed_output_limbs = gfp5_scalar_mul_limbwise_circuit_lifted(builder, c, prod_limbs);
+
+            for (output_limb, computed_output_limb) in output_limbs.into_iter().zip(computed_output_limbs) {
+                let diff = builder.sub_extension(output_limb, computed_output_limb);
+                constraints.push(diff);
+            }
 			
-			for (output_limb, (axy_limb, bz_limb)) in output_limbs.into_iter().zip(axy_limbs.into_iter().zip(bz_limbs)) {
-				let computed_output_limb = builder.add_extension(axy_limb, bz_limb);
-				let diff = builder.sub_extension(output_limb, computed_output_limb);
-				constraints.push(diff);
-			}
         }
 
         constraints
@@ -131,10 +120,9 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for ArithmeticGFp5
         (0..self.num_ops)
             .map(|op_idx| {
                 let g: Box<dyn WitnessGenerator<F>> = Box::new(
-                    ArithmeticGFp5Generator {
+                    MulGFp5Generator {
                         row,
-                        const_0_limbs: local_constants[0..DEGREE].try_into().unwrap(),
-                        const_1_limbs: local_constants[DEGREE..2*DEGREE].try_into().unwrap(),
+                        c: local_constants[0],
                         op_idx,
                     }
                     .adapter(),
@@ -149,7 +137,7 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for ArithmeticGFp5
     }
 
     fn num_constants(&self) -> usize {
-        2 * DEGREE
+        1
     }
 
     fn degree(&self) -> usize {
@@ -162,20 +150,18 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for ArithmeticGFp5
 }
 
 #[derive(Clone, Debug)]
-pub struct ArithmeticGFp5Generator<F: RichField + Extendable<D>, const D: usize> {
+pub struct MulGFp5Generator<F: RichField + Extendable<D>, const D: usize> {
 	row: usize,
-	const_0_limbs: [F; 5],
-	const_1_limbs: [F; 5],
+	c: F,
 	op_idx: usize,
 }
 
 impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F>
-    for ArithmeticGFp5Generator<F, D>
+    for MulGFp5Generator<F, D>
 {
     fn dependencies(&self) -> Vec<Target> {
-		ArithmeticGFp5Gate::wires_ith_multiplicand_0(self.op_idx)
-			.chain(ArithmeticGFp5Gate::wires_ith_multiplicand_1(self.op_idx))
-			.chain(ArithmeticGFp5Gate::wires_ith_addend(self.op_idx))
+		MulGFp5Gate::wires_ith_multiplicand_0(self.op_idx)
+			.chain(MulGFp5Gate::wires_ith_multiplicand_1(self.op_idx))
 			.map(|wire| Target::wire(self.row, wire))
 			.collect()
     }
@@ -183,22 +169,18 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F>
     fn run_once(&self, witness: &PartitionWitness<F>, out_buffer: &mut GeneratedValues<F>) {
         let get_wire = |wire: usize| -> F { witness.get_target(Target::wire(self.row, wire)) };
 		
-		let multiplicand_0_limbs: [F; 5] = ArithmeticGFp5Gate::wires_ith_multiplicand_0(self.op_idx).map(|wire| get_wire(wire)).collect::<Vec<_>>().try_into().unwrap();
-		let multiplicand_1_limbs: [F; 5] = ArithmeticGFp5Gate::wires_ith_multiplicand_1(self.op_idx).map(|wire| get_wire(wire)).collect::<Vec<_>>().try_into().unwrap();
-		let addend_limbs: [F; 5] = ArithmeticGFp5Gate::wires_ith_addend(self.op_idx).map(|wire| get_wire(wire)).collect::<Vec<_>>().try_into().unwrap();
+		let multiplicand_0_limbs: [F; 5] = MulGFp5Gate::wires_ith_multiplicand_0(self.op_idx).map(|wire| get_wire(wire)).collect::<Vec<_>>().try_into().unwrap();
+		let multiplicand_1_limbs: [F; 5] = MulGFp5Gate::wires_ith_multiplicand_1(self.op_idx).map(|wire| get_wire(wire)).collect::<Vec<_>>().try_into().unwrap();
+        let output_limbs = MulGFp5Gate::wires_ith_output(self.op_idx).map(|wire| Target::wire(self.row, wire));
 
-        let output_limbs = ArithmeticGFp5Gate::wires_ith_output(self.op_idx).map(|wire| Target::wire(self.row, wire));
+		let prod_limbs = gfp5_mul_limbwise(multiplicand_0_limbs, multiplicand_1_limbs);
+        let computed_output_limbs = gfp5_scalar_mul_limbwise(self.c, prod_limbs);
 
-		let xy_limbs = gfp5_mul_limbwise(multiplicand_0_limbs, multiplicand_1_limbs);
-		let axy_limbs = gfp5_mul_limbwise(self.const_0_limbs, xy_limbs);
-		let bz_limbs = gfp5_mul_limbwise(self.const_1_limbs, addend_limbs);
-
-		for (output_limb, (axy_limb, bz_limb)) in output_limbs.into_iter().zip(axy_limbs.into_iter().zip(bz_limbs)) {
-			out_buffer.set_target(output_limb, axy_limb + bz_limb)
-		}
+        for (output_limb, computed_output_limb) in output_limbs.into_iter().zip(computed_output_limbs) {
+            out_buffer.set_target(output_limb, computed_output_limb);
+        }
     }
 }
-
 
 fn gfp5_mul_limbwise<F: Field>(a: [F; 5], b: [F; 5]) -> [F; 5] {
 	let [a0, a1, a2, a3, a4] = a;
@@ -219,6 +201,16 @@ fn gfp5_mul_limbwise<F: Field>(a: [F; 5], b: [F; 5]) -> [F; 5] {
 	let c4 = a0 * b4 + a1 * b3 + a2 * b2 + a3 * b1 + a4 * b0;
 
 	[c0, c1, c2, c3, c4]
+}
+
+fn gfp5_scalar_mul_limbwise<F: Field>(c: F, a: [F; 5]) -> [F; 5] {
+    [
+        c * a[0],
+        c * a[1],
+        c * a[2],
+        c * a[3],
+        c * a[4],
+    ]
 }
 
 fn gfp5_mul_limbwise_circuit_lifted<F: RichField + Extendable<D>, const D: usize>(builder: &mut CircuitBuilder<F, D>, a: [ExtensionTarget<D>; 5], b: [ExtensionTarget<D>; 5]) -> [ExtensionTarget<D>; 5] {
@@ -267,6 +259,16 @@ fn gfp5_mul_limbwise_circuit_lifted<F: RichField + Extendable<D>, const D: usize
 	[c0, c1, c2, c3, c4]
 }
 
+fn gfp5_scalar_mul_limbwise_circuit_lifted<F: RichField + Extendable<D>, const D: usize>(builder: &mut CircuitBuilder<F, D>, c: ExtensionTarget<D>, a: [ExtensionTarget<D>; 5]) -> [ExtensionTarget<D>; 5] {
+    [
+        builder.mul_extension(c, a[0]),
+        builder.mul_extension(c, a[1]),
+        builder.mul_extension(c, a[2]),
+        builder.mul_extension(c, a[3]),
+        builder.mul_extension(c, a[4]),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
@@ -279,7 +281,7 @@ mod tests {
 
     #[test]
     fn low_degree() {
-        let gate = ArithmeticGFp5Gate::new_from_config(&CircuitConfig::standard_recursion_config());
+        let gate = MulGFp5Gate::new_from_config(&CircuitConfig::standard_recursion_config());
         test_low_degree::<GoldilocksField, _, 4>(gate);
 	}
 
@@ -288,7 +290,7 @@ mod tests {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
-        let gate = ArithmeticGFp5Gate::new_from_config(&CircuitConfig::standard_recursion_config());
+        let gate = MulGFp5Gate::new_from_config(&CircuitConfig::standard_recursion_config());
         test_eval_fns::<F, C, _, D>(gate)
     }
 }
