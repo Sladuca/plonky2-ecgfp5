@@ -421,6 +421,8 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 a: QuinticExtensionTarget,
                 b: QuinticExtensionTarget,
             ) -> QuinticExtensionTarget {
+                // TODO: check for special cases
+                // TODO: check to see if we've done the same operation already
                 let gate = MulGFp5Gate::new_from_config(&self.config);
                 let constants = &[c];
                 let (gate, i) = self.find_slot(gate, constants, constants);
@@ -442,51 +444,6 @@ macro_rules! impl_circuit_builder_for_extension_degree {
                 b: QuinticExtensionTarget,
             ) -> QuinticExtensionTarget {
                 self.weighted_mul_quintic_ext(GFp::ONE, a, b)
-
-
-                // // c0 ← a0b0 + 3(a1b4 + a2b3 + a3b2 + a4b1)
-                // // c1 ← a0b1 + a1b0 + 3(a2b4 + a3b3 + a4b2)
-                // // c2 ← a0b2 + a1b1 + a2b0 + 3(a3b4 + a4b3)
-                // // c3 ← a0b3 + a1b2 + a2b1 + a3b0 + 3a4b4
-                // // c4 ← a0b4 + a1b3 + a2b2 + a3b1 + a4b0
-                // let QuinticExtensionTarget([a0, a1, a2, a3, a4]) = a;
-                // let QuinticExtensionTarget([b0, b1, b2, b3, b4]) = b;
-
-                // let mut c0 = self.mul(a4, b1);
-                // c0 = self.mul_add(a3, b2, c0);
-                // c0 = self.mul_add(a2, b3, c0);
-                // c0 = self.mul_add(a1, b4, c0);
-                // c0 = self.mul_const(GFp::from_canonical_u64(3), c0);
-                // c0 = self.mul_add(a0, b0, c0);
-
-                // let mut c1 = self.mul(a4, b2);
-                // c1 = self.mul_add(a3, b3, c1);
-                // c1 = self.mul_add(a2, b4, c1);
-                // c1 = self.mul_const(GFp::from_canonical_u64(3), c1);
-                // c1 = self.mul_add(a1, b0, c1);
-                // c1 = self.mul_add(a0, b1, c1);
-
-                // let mut c2 = self.mul(a4, b3);
-                // c2 = self.mul_add(a3, b4, c2);
-                // c2 = self.mul_const(GFp::from_canonical_u64(3), c2);
-                // c2 = self.mul_add(a2, b0, c2);
-                // c2 = self.mul_add(a1, b1, c2);
-                // c2 = self.mul_add(a0, b2, c2);
-
-                // let mut c3 = self.mul(a4, b4);
-                // c3 = self.mul_const(GFp::from_canonical_u64(3), c3);
-                // c3 = self.mul_add(a3, b0, c3);
-                // c3 = self.mul_add(a2, b1, c3);
-                // c3 = self.mul_add(a1, b2, c3);
-                // c3 = self.mul_add(a0, b3, c3);
-
-                // let mut c4 = self.mul(a4, b0);
-                // c4 = self.mul_add(a3, b1, c4);
-                // c4 = self.mul_add(a2, b2, c4);
-                // c4 = self.mul_add(a1, b3, c4);
-                // c4 = self.mul_add(a0, b4, c4);
-
-                // QuinticExtensionTarget::new([c0, c1, c2, c3, c4])
             }
 
             fn mul_const_quintic_ext(
@@ -496,37 +453,6 @@ macro_rules! impl_circuit_builder_for_extension_degree {
             ) -> QuinticExtensionTarget {
                 let c = self.constant_quintic_ext(c);
                 self.weighted_mul_quintic_ext(GFp::ONE, c, a)
-
-                // let QuinticExtensionTarget([a0, a1, a2, a3, a4]) = a;
-                // let QuinticExtension([c0, c1, c2, c3, c4]) = c;
-                // let one = self.one();
-
-                // let lhs = self.arithmetic(c1, c2, one, a4, a3);
-                // let rhs = self.arithmetic(c3, c4, one, a2, a1);
-                // let mut r0 = self.add(lhs, rhs);
-                // r0 = self.arithmetic(c0, THREE, one, a0, r0);
-
-                // let mut rhs = self.arithmetic(c2, c3, one, a4, a3);
-                // rhs = self.arithmetic(c4 * THREE, THREE, one, a2, rhs);
-                // let lhs = self.arithmetic(c0, c1, one, a1, a0);
-                // let r1 = self.add(lhs, rhs);
-
-                // let mut rhs = self.arithmetic(c3, c4, one, a4, a3);
-                // rhs = self.arithmetic(c2, THREE, one, a0, rhs);
-                // let lhs = self.arithmetic(c0, c1, one, a2, a1);
-                // let r2 = self.add(lhs, rhs);
-
-                // let mut rhs = self.arithmetic(c3, THREE * c4, one, a0, a4);
-                // rhs = self.arithmetic(c2, GFp::ONE, one, a1, rhs);
-                // let lhs = self.arithmetic(c0, c1, one, a3, a2);
-                // let r3 = self.add(lhs, rhs);
-
-                // let mut rhs = self.arithmetic(c3, c4, one, a1, a0);
-                // rhs = self.arithmetic(c2, GFp::ONE, one, a2, rhs);
-                // let lhs = self.arithmetic(c0, c1, one, a4, a3);
-                // let r4 = self.add(lhs, rhs);
-
-                // QuinticExtensionTarget::new([r0, r1, r2, r3, r4])
             }
 
             fn div_quintic_ext(
@@ -741,37 +667,6 @@ macro_rules! impl_circuit_builder_for_extension_degree {
 
             fn square_quintic_ext(&mut self, a: QuinticExtensionTarget) -> QuinticExtensionTarget {
                 self.mul_quintic_ext(a, a)
-
-                // let zero = self.zero();
-                // let QuinticExtensionTarget([a0, a1, a2, a3, a4]) = a;
-
-                // c0 ← a0^2 + 6a1a4 + 6a2a3
-                // c1 ← 3a3^2 + 2a0a1 + 6a2a4
-                // c2 ← a1^2 + 2a0a2 + 6a3a4
-                // c3 ← 3a4^2 + 2a0a3 + 2a1a2
-                // c4 ← a2^2 + 2a0a4 + 2a1a3
-
-                // let mut c0 = self.square(a0);
-                // c0 = self.arithmetic(SIX, GFp::ONE, a1, a4, c0);
-                // c0 = self.arithmetic(SIX, GFp::ONE, a2, a3, c0);
-
-                // let mut c1 = self.arithmetic(THREE, GFp::ZERO, a3, a3, zero);
-                // c1 = self.arithmetic(GFp::TWO, GFp::ONE, a0, a1, c1);
-                // c1 = self.arithmetic(SIX, GFp::ONE, a2, a4, c1);
-                
-                // let mut c2 = self.square(a1);
-                // c2 = self.arithmetic(GFp::TWO, GFp::ONE, a0, a2, c2);
-                // c2 = self.arithmetic(SIX, GFp::ONE, a3, a4, c2);
-
-                // let mut c3 = self.arithmetic(THREE, GFp::ZERO, a4, a4, zero);
-                // c3 = self.arithmetic(GFp::TWO, GFp::ONE, a0, a3, c3);
-                // c3 = self.arithmetic(GFp::TWO, GFp::ONE, a1, a2, c3);
-
-                // let mut c4 = self.square(a2);
-                // c4 = self.arithmetic(GFp::TWO, GFp::ONE, a0, a4, c4);
-                // c4 = self.arithmetic(GFp::TWO, GFp::ONE, a1, a3, c4);
-
-                // QuinticExtensionTarget([c0, c1, c2, c3, c4])
             }
 
             fn add_many_quintic_ext(
