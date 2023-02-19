@@ -146,8 +146,7 @@ macro_rules! impl_circuit_builder_for_extension_degree {
 
                 let lambda_0_if_x_not_same = self.sub_quintic_ext(y2, y1);
 
-                let mut lambda_0_if_x_same = self.square_quintic_ext(x1);
-                lambda_0_if_x_same = self.triple_quintic_ext(lambda_0_if_x_same);
+                let mut lambda_0_if_x_same = self.weighted_mul_quintic_ext(GFp::from_canonical_u8(3), x1, x1);
                 lambda_0_if_x_same =
                     self.add_const_quintic_ext(lambda_0_if_x_same, WeierstrassPoint::A);
 
@@ -195,8 +194,7 @@ macro_rules! impl_circuit_builder_for_extension_degree {
             fn curve_double(&mut self, a: CurveTarget) -> CurveTarget {
                 let CurveTarget(([x, y], is_inf)) = a;
 
-                let mut lambda_0 = self.square_quintic_ext(x);
-                lambda_0 = self.triple_quintic_ext(lambda_0);
+                let mut lambda_0 = self.weighted_mul_quintic_ext(GFp::from_canonical_u8(3), x, x);
                 lambda_0 = self.add_const_quintic_ext(lambda_0, WeierstrassPoint::A);
                 let lambda_1 = self.double_quintic_ext(y);
 
